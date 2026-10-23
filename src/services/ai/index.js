@@ -1,7 +1,7 @@
 const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE, DEFAULT_MCP_APPROVER, forGuild, ownerOf } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS, supportsStructured } = require('./providers');
 const { recordUsage } = require('./usage');
-const { enforceRateLimit, toolCallBudget } = require('./rateLimit');
+const { enforceRateLimit, toolCallBudget, guildLimitsOf } = require('./rateLimit');
 const { applyEnvKeyCeilings } = require('./apiKeys');
 const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJson');
 
@@ -77,13 +77,7 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
     // The monthly ceilings ride in the same block for the same reason, and are
     // the one limit here that also binds a call nobody sent: the scheduled
     // digests and newspapers spend this guild's money too (#831).
-    const guildLimits = {
-        perUser: aiSettings.rateLimitPerUser ?? 0,
-        perChannel: aiSettings.rateLimitPerChannel ?? 0,
-        windowMin: aiSettings.rateLimitWindowMin ?? 10,
-        monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
-        monthlyCost: aiSettings.monthlyCostLimit ?? 0
-    };
+    const guildLimits = guildLimitsOf(aiSettings);
     // Spend on the operator's environment key is the operator's money, so
     // their ceilings bind it whatever the guild set (#1147). A guild can only
     // tighten them — its own limits are 0-for-unlimited, and those zeroes are
@@ -104,8 +98,93 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
         mcpConfirm,
         mcpRoute,
         mcpApprover,
-        rateLimit
+        rateLimit,
+        fallbacks: resolveFallbacks(aiSettings, { guildId, primary: providerName, primaryKeySource: auth.keySource ?? null })
     };
+}
+
+// How many backups a guild may list. One is the usual case — a second vendor
+// for when the first is down — and two covers "and then a local model".
+const MAX_FALLBACKS = 2;
+
+/**
+ * The backup providers a guild listed (`ai.fallbacks`), each resolved to the
+ * fields that differ per provider, in order. A backup with no usable
+ * credential is left out rather than tried and failed.
+ *
+ * One exception keeps the operator's money where it was: a backup that would
+ * run on the operator's environment key is only kept when the primary does too.
+ * The rate limits enforced on a request are the primary's, and only an
+ * env-key primary carries the operator's ceilings (#1147); a guild on its own
+ * key must not be able to spill its traffic onto the operator's bill by naming
+ * a backup it has no key for.
+ */
+function resolveFallbacks(aiSettings, { guildId, primary, primaryKeySource }) {
+    const listed = Array.isArray(aiSettings.fallbacks) ? aiSettings.fallbacks.slice(0, MAX_FALLBACKS) : [];
+    const out = [];
+    for (const entry of listed) {
+        const name = entry?.provider;
+        const providerDef = name && providers.get(name);
+        if (!providerDef) continue;
+        const model = (typeof entry.model === 'string' && entry.model.trim()) || DEFAULT_MODELS[name];
+        // The same provider and model as the primary is not a backup.
+        if (name === primary && model === (aiSettings.model || DEFAULT_MODELS[primary])) continue;
+        const auth = providerDef.resolveAuth(aiSettings, { guildId }) || {};
+        if (name !== 'ollama' && !auth.apiKey) continue;
+        if (auth.keySource === 'env' && primaryKeySource !== 'env') continue;
+        out.push({ provider: name, model, apiKey: auth.apiKey ?? null, baseUrl: auth.baseUrl ?? null });
+    }
+    return out;
+}
+
+// HTTP statuses that say "this provider cannot answer right now" rather than
+// "this request is wrong": a backup has a real chance with any of them. A 400
+// is deliberately absent — a prompt too long or a refused request is the same
+// request to the next provider, and would fail there too.
+const FALLBACK_STATUSES = new Set([401, 403, 404, 408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524, 529]);
+
+/**
+ * Whether a failed call is worth trying on the next provider.
+ *
+ * No status at all is a connection that failed — refused, reset, timed out,
+ * DNS — which is the clearest case. The bot's own refusals (rate limit, budget)
+ * are never retried elsewhere: they are the guild's limits, not a provider's.
+ */
+function shouldFallBack(error) {
+    if (!error || error.rateLimited || error.budgetExceeded || error.name === 'AiRateLimitError' || error.name === 'AiBudgetError') {
+        return false;
+    }
+    // A cancelled request was cancelled on purpose: asking the next provider
+    // would answer something nobody is waiting for any more.
+    if (error.name === 'AbortError' || error.name === 'APIUserAbortError') return false;
+    const status = Number(error.status ?? error.statusCode ?? error.response?.status ?? error.code);
+    if (Number.isInteger(status) && status >= 100 && status < 600) return FALLBACK_STATUSES.has(status);
+    return true;
+}
+
+/** The request as each provider in turn would make it. */
+function attemptsFor(req) {
+    const { fallbacks = [], ...primary } = req;
+    return [primary, ...fallbacks.map(fallback => ({ ...primary, ...fallback }))];
+}
+
+/**
+ * A tool-event listener that also records whether any tool actually ran. A
+ * turn that ran one has done something in the world — filed the issue, moved
+ * the event — and replaying it on another provider would do it twice.
+ */
+function trackTools(onToolEvent) {
+    const state = { ran: false };
+    const listener = event => {
+        if (event?.type === 'start') state.ran = true;
+        return onToolEvent?.(event);
+    };
+    return { state, listener };
+}
+
+function describeFailure(error) {
+    const status = error?.status ?? error?.statusCode ?? error?.response?.status;
+    return status ? `HTTP ${status}` : (error?.code || error?.message || 'error');
 }
 
 /**
@@ -142,7 +221,34 @@ function streamCompletion({ userId, channelId, rateLimit, keySource, keyError, .
     // Built here for the same reason the limit is enforced here — it is the one
     // place every provider request passes through — and carried down to the MCP
     // toolkit, which is what spends it.
-    return streamProvider({ ...args, toolBudget: toolCallBudget({ guildId: args.guildId, userId, rateLimit }) });
+    return streamWithFallback({ ...args, toolBudget: toolCallBudget({ guildId: args.guildId, userId, rateLimit }) });
+}
+
+/**
+ * The stream from the first provider that answers.
+ *
+ * Only before anything has been said: once a chunk is on screen the reply is
+ * that provider's, and a second one starting over would read as two answers
+ * spliced together — so a failure after the first chunk is the caller's, as it
+ * always was. Never after a tool ran, for the reason `trackTools` gives.
+ */
+async function* streamWithFallback(req) {
+    const attempts = attemptsFor(req);
+    for (let i = 0; i < attempts.length; i++) {
+        const { state, listener } = trackTools(req.onToolEvent);
+        let yielded = false;
+        try {
+            for await (const chunk of streamProvider({ ...attempts[i], onToolEvent: listener })) {
+                yielded = true;
+                yield chunk;
+            }
+            return;
+        } catch (error) {
+            const next = attempts[i + 1];
+            if (!next || yielded || state.ran || !shouldFallBack(error)) throw error;
+            console.warn(`[AI] ${attempts[i].provider}/${attempts[i].model} failed (${describeFailure(error)}); answering with ${next.provider}/${next.model}`);
+        }
+    }
 }
 
 /**
@@ -158,13 +264,28 @@ function ownedServers(mcpServers, guildId) {
     return forGuild(guildId, mcpServers);
 }
 
+/**
+ * Charge a request's tokens to the guild's ledger, off the caller's path.
+ *
+ * Also called with the usage a failed or cancelled request carries on its error
+ * (#1238): every round that came back before it was billed, and a turn given up
+ * on half way is still a turn the guild paid for.
+ */
+function chargeUsage(guildId, provider, model, usage) {
+    if (!guildId || !usage) return;
+    recordUsage(guildId, provider, model, usage).catch(err =>
+        console.error('[AI usage] record error:', err.message));
+}
+
 async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req }) {
     req.mcpServers = ownedServers(req.mcpServers, guildId);
-    yield* getProvider(provider).stream({ ...req, usageOut, useMcp: mcp });
-    if (guildId && usageOut?.usage) {
-        recordUsage(guildId, provider, req.model, usageOut.usage).catch(err =>
-            console.error('[AI usage] record error:', err.message));
+    try {
+        yield* getProvider(provider).stream({ ...req, usageOut, useMcp: mcp });
+    } catch (error) {
+        chargeUsage(guildId, provider, req.model, error?.usage);
+        throw error;
     }
+    chargeUsage(guildId, provider, req.model, usageOut?.usage);
 }
 
 /**
@@ -179,22 +300,46 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
  * @param {string} [req.userId]
  * @param {string} [req.channelId]
  * @param {object} [req.rateLimit]
+ * @param {Function} [req.toolBudget] spend tool calls from this budget instead
+ *   of the one `userId` would get
+ * @param {AbortSignal} [req.signal] cancels the turn (#1238): no new provider
+ *   request starts once it has fired, and the one in flight is aborted
  * @returns {Promise<string>} the reply text — not the provider's result object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, keySource, keyError, ...req }) {
+async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, keySource, keyError, toolBudget: sharedBudget, ...req }) {
     enforceRateLimit({ guildId, userId, channelId, rateLimit });
-    const result = await getProvider(provider).complete({
-        ...req,
-        mcpServers: ownedServers(req.mcpServers, guildId),
-        useMcp: mcp,
-        toolBudget: toolCallBudget({ guildId, userId, rateLimit })
-    });
-    if (guildId && result.usage) {
-        recordUsage(guildId, provider, req.model, result.usage).catch(err =>
-            console.error('[AI usage] record error:', err.message));
+    // A delegated child turn (delegate.js) passes its parent's budget and no
+    // user: it spends the parent's tool calls, not a message slot of its own.
+    // Null is a budget too (the parent's is unbounded), so only a missing one
+    // is worked out here — or a child would land on the scheduled-run budget.
+    const toolBudget = sharedBudget !== undefined ? sharedBudget : toolCallBudget({ guildId, userId, rateLimit });
+    const attempts = attemptsFor({ provider, ...req });
+
+    for (let i = 0; i < attempts.length; i++) {
+        const { provider: name, ...attempt } = attempts[i];
+        const { state, listener } = trackTools(attempt.onToolEvent);
+        let result;
+        try {
+            result = await getProvider(name).complete({
+                ...attempt,
+                onToolEvent: listener,
+                mcpServers: ownedServers(attempt.mcpServers, guildId),
+                useMcp: mcp,
+                toolBudget
+            });
+        } catch (error) {
+            chargeUsage(guildId, name, attempt.model, error?.usage);
+            const next = attempts[i + 1];
+            if (!next || state.ran || !shouldFallBack(error)) throw error;
+            console.warn(`[AI] ${name}/${attempt.model} failed (${describeFailure(error)}); answering with ${next.provider}/${next.model}`);
+            continue;
+        }
+        chargeUsage(guildId, name, attempt.model, result.usage);
+        return result.text;
     }
-    return result.text;
+    // Unreachable: the last attempt either returns or throws.
+    throw new Error('no provider answered');
 }
 
 /**
@@ -227,7 +372,10 @@ async function getCompletion({ provider, guildId, mcp = true, userId, channelId,
  * @returns {Promise<object>} the parsed object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-async function getStructuredCompletion({ provider, guildId, userId, channelId, rateLimit, schema, schemaName, maxTokens, budgets = DEFAULT_TOKEN_BUDGETS, keySource, keyError, ...req }) {
+// Structured calls stay on the primary: their callers parse the answer against
+// one provider's schema support, and a backup with no native structured output
+// would change the shape of the failure rather than avoid it.
+async function getStructuredCompletion({ provider, guildId, userId, channelId, rateLimit, schema, schemaName, maxTokens, budgets = DEFAULT_TOKEN_BUDGETS, keySource, keyError, fallbacks: _fallbacks, ...req }) {
     const providerImpl = getProvider(provider);
 
     if (typeof providerImpl.structured === 'function' && supportsStructured(provider, req.model)) {
@@ -258,4 +406,4 @@ async function getStructuredCompletion({ provider, guildId, userId, channelId, r
     );
 }
 
-module.exports = { resolveProviderConfig, streamCompletion, getCompletion, getStructuredCompletion, DEFAULT_MODELS };
+module.exports = { resolveProviderConfig, streamCompletion, getCompletion, getStructuredCompletion, shouldFallBack, DEFAULT_MODELS, MAX_FALLBACKS };

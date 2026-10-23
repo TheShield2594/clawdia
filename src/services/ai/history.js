@@ -1,4 +1,5 @@
 const Conversation = require('../../models/Conversation');
+const ConversationLog = require('../../models/ConversationLog');
 
 // Per-user, per-channel conversation history for the AI chat loop, and the
 // rolling summary of everything that has fallen out of it (#833).
@@ -36,9 +37,38 @@ async function loadHistory(guildId, channelId, userId, max) {
  * sent, and a summary is worth less than the turn it would fail.
  *
  * @param {Function} [summarize] async ({summary, dropped}) => string|null
+ * @param {object} [options]
+ * @param {boolean} [options.archive] also append both turns to the searchable
+ *        ConversationLog (the guild's `ai.conversationSearch`)
  */
-async function appendHistory(guildId, channelId, userId, userText, assistantText, max, summarize) {
+async function appendHistory(guildId, channelId, userId, userText, assistantText, max, summarize, { archive = false } = {}) {
+    // The searchable log is independent of the retention window: a guild that
+    // keeps no history for context can still want its members' turns findable.
+    if (archive) {
+        const now = Date.now();
+        await ConversationLog.insertMany([
+            { guildId, userId, channelId, role: 'user', content: userText, createdAt: new Date(now) },
+            { guildId, userId, channelId, role: 'assistant', content: assistantText, createdAt: new Date(now + 1) }
+        ].filter(turn => typeof turn.content === 'string' && turn.content.trim())).catch(err => {
+            console.warn(`[AI history] could not log the turn for search: ${err.message}`);
+        });
+    }
     if (!max || max <= 0) return;
+    // Two turns in the same conversation can finish together — two quick
+    // mentions — and both read the document before either saves. The trim
+    // reassigns `messages`, which Mongoose versions, so the second save throws
+    // a VersionError; on a conversation's first turn the second insert hits the
+    // unique index instead. Either way that turn would be lost, so it is
+    // written once more against the document as the first one left it.
+    try {
+        await writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize);
+    } catch (err) {
+        if (err?.name !== 'VersionError' && err?.code !== 11000) throw err;
+        await writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize);
+    }
+}
+
+async function writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize) {
     let doc = await Conversation.findOne({ guildId, channelId, userId });
     if (!doc) {
         doc = new Conversation({ guildId, channelId, userId, messages: [] });

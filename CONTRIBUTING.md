@@ -48,7 +48,7 @@ creating the application, and the integration suites use
 `mongodb-memory-server`, which downloads a MongoDB binary on first run.
 
 ```bash
-npm run dev             # nodemon, restarts on save
+npm run dev             # node --watch, restarts on save
 npm start               # plain node, and what the image runs
 ```
 

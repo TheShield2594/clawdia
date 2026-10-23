@@ -7,7 +7,8 @@
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
  * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics
- * + achievement badges (`achievement:<id>`, filled in incrementally). Each
+ * + achievement badges (`achievement:<id>`, filled in incrementally)
+ * + crafting materials (`fish:<id>` etc., one game at a time, #1168). Each
  * entry carries the storage key, the on-disk filename, the item's rarity, the
  * rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
@@ -539,16 +540,191 @@ Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
     });
 });
 
+// --- crafting materials ------------------------------------------------------
+// The drops left in a player's inventory (#1168), keyed `<activity>:<id>` the
+// way the inventory cards ask for them (src/data/activityItems.js). Single
+// objects like the gear and relic icons, rarity from the material's own tier in
+// src/data/materialRarity.js. Filled in one game at a time; fishing first
+// (#1169), then mining (#1170), hunting (#1171) and exploration (#1172).
+const { MATERIAL_RARITY } = require('../../src/data/materialRarity.js');
+const MATERIAL_TIER_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+
+// The three scales are a ladder (§4): one teardrop scale, same angle, and only
+// the material escalates — plain silver, then iridescent, then cosmic.
+const SCALE = (detail) => `a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, ${detail}`;
+const FISH_MATERIAL_SUBJECT = {
+    fish_scale:     SCALE('plain pearly silver-blue with a soft sheen.'),
+    rare_scale:     SCALE('shimmering iridescent teal and violet, a few tiny sparkles at its edge.'),
+    mythic_scale:   SCALE('deep cosmic indigo flecked with tiny stars, a faint golden glow along its rim.'),
+    seaweed_bundle: 'a small bundle of glossy green kelp ribbons tied around the middle with a twist of twine.',
+    driftwood:      'a short gnarled piece of sun-bleached driftwood, smooth pale grey wood with a knot hole.',
+    old_coin:       'a single worn antique gold coin, tarnished green at the edges, stamped with a faded ship.',
+    pearl:          'a single lustrous round white pearl resting in a small open oyster shell.',
+    coral_fragment: 'a branching fragment of bright coral-pink coral with a few rounded tips.',
+    shark_tooth:    'a single large serrated triangular shark tooth, ivory white with a darker root.',
+    tentacle_ink:   'a small corked glass vial of swirling inky black-purple liquid with a curled purple tentacle wrapped around it.',
+};
+Object.entries(FISH_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'fish') throw new Error(`no fishing material ${id}`);
+    add(`fish:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Mining (#1170). Each material is a small piece of the ore it drops from, so
+// it takes that ore icon's colours (`ore:<id>` above). Like kinds share a shape:
+// every dust is the same small heap, every raw gem the same rough uncut stone.
+const DUST = (detail) => `a small conical heap of fine glittering powder, ${detail}`;
+const RAW_GEM = (detail) => `a single rough uncut gemstone with jagged natural facets, ${detail}`;
+const MINE_MATERIAL_SUBJECT = {
+    rock_fragment:  'a single small broken fragment of plain grey stone with sharp chipped edges and a few speckles.',
+    coal_dust:      DUST('matte charcoal-black coal dust with a few tiny dark lumps on top.'),
+    copper_flake:   'a single thin curled flake of shiny orange copper metal, its edges tinged with green verdigris.',
+    iron_filing:    'a little cluster of thin dark grey iron filings and slivers, bristling outward like a tiny hedgehog.',
+    silver_dust:    DUST('lustrous bright silver dust catching the light.'),
+    lead_slug:      'a single small heavy rounded slug of dull blue-grey lead metal, slightly flattened.',
+    quartz_shard:   'a single clear pointed six-sided quartz crystal shard, pale icy white with a cloudy base.',
+    gold_nugget:    'a single lumpy rounded raw gold nugget, bright warm yellow gold with pitted bumps.',
+    raw_sapphire:   RAW_GEM('deep rich blue sapphire.'),
+    amethyst_chip:  'a single small chipped wedge of purple amethyst crystal with a few tiny pointed crystal tips.',
+    topaz_shard:    'a single long pointed shard of warm amber-orange topaz with clean straight facets.',
+    raw_emerald:    RAW_GEM('deep forest-green emerald.'),
+    raw_ruby:       RAW_GEM('blazing ember-red ruby with a faint inner glow.'),
+    obsidian_chip:  'a single razor-sharp chip of glossy black volcanic obsidian glass with curved conchoidal fracture ridges.',
+    platinum_dust:  DUST('pale white-silver platinum dust with a cool dull gleam.'),
+    raw_diamond:    RAW_GEM('icy clear-white diamond scattering tiny sparkles.'),
+    crystal_sliver: 'a single thin jagged sliver of near-black dark crystal with a deep violet edge glow, seeming to swallow the light around it.',
+    mythril_dust:   DUST('shimmering pale mint-silver mythril dust with a soft magical glow.'),
+    zenith_essence: 'a small corked glass vial of glowing liquid starlight, pale gold and white, with a tiny star sparkle inside.',
+    primordial_ash: 'a small smouldering heap of dark grey volcanic ash with glowing molten-orange embers and a wisp of heat shimmer.',
+    stardust:       'a small swirl of glittering cosmic stardust in deep blue and gold, sprinkled with tiny four-pointed stars.',
+    void_essence:   'a small floating orb of swirling void energy, inky black at the core with a violet rim and tiny drifting specks.',
+};
+Object.entries(MINE_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'mine') throw new Error(`no mining material ${id}`);
+    add(`mine:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Hunting (#1171). Each material is a part of the animal that drops it
+// (`animal:<id>` above), in that animal's colours. Like kinds share a shape:
+// every pelt is the same stretched hide, every feather the same quill, and so
+// on for fangs, claws, antlers, horns, tusks, feet and venom vials.
+const PELT = (detail) => `a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, ${detail}`;
+const FEATHER = (detail) => `a single long feather angled diagonally with a curved quill at the base, ${detail}`;
+const FANG = (detail) => `a single long curved pointed fang standing upright with a thick root, ${detail}`;
+const CLAW = (detail) => `a single large hooked claw curving to a sharp point, ${detail}`;
+const ANTLER = (detail) => `a single branching antler with several pointed tines, ${detail}`;
+const HORN = (detail) => `a single thick ridged horn sweeping back into a curl, ${detail}`;
+const TUSK = (detail) => `a single smooth curved tusk arcing upward to a blunt point, ${detail}`;
+const FOOT = (detail) => `a single furry lucky animal foot charm hanging from a small gold ring, ${detail}`;
+const VENOM = (detail) => `a small corked glass vial of glowing liquid, ${detail}`;
+const HUNT_MATERIAL_SUBJECT = {
+    // Pelts, hides and fur.
+    badger_pelt:       PELT('coarse grey fur with a bold black-and-white striped head flap.'),
+    beaver_pelt:       PELT('glossy dense chestnut-brown fur.'),
+    wolf_pelt:         PELT('thick shaggy grey wolf fur with a paler cream belly.'),
+    spirit_pelt:       PELT('ghostly pale blue-white snow leopard fur with dark rosette spots, a faint spectral glow and wisps of frost drifting off it.'),
+    striped_pelt:      PELT('tiny tawny-orange chipmunk fur with dark and cream stripes down its length.'),
+    opossum_pelt:      PELT('scruffy pale grey-white opossum fur with a bare pink tail flap.'),
+    sand_pelt:         PELT('soft sandy-cream fennec fox fur with a white belly.'),
+    arctic_fox_pelt:   PELT('pristine fluffy snow-white arctic fox fur.'),
+    shadow_pelt:       PELT('sleek jet-black panther fur with a faint purple sheen.'),
+    thick_hide:        'a single heavy folded slab of thick shaggy dark-brown musk ox hide with long coarse fur hanging from its edge.',
+    gator_hide:        'a single folded slab of tough olive-green alligator hide covered in raised bumpy armored scutes.',
+    slick_skin:        'a single small glossy limp strip of bright green frog skin with darker spots and a wet shine.',
+    wolverine_fur:     'a single thick tuft of dark brown wolverine fur with a tan stripe, tied at the base with a twist of cord.',
+    golden_fur:        'a single thick tuft of shimmering golden fox fur tied at the base with a twist of cord, glowing softly with tiny sparkles.',
+    swamp_scale:       'a single large rounded scale, dark murky green with olive spots and a wet gleam.',
+    // Feathers.
+    feather:           FEATHER('plain clean white dove feather.'),
+    down_feather:      'a single small fluffy soft down feather, pale grey-brown and wispy.',
+    crow_feather:      FEATHER('glossy jet-black crow feather with a blue-purple sheen.'),
+    scavenger_feather: FEATHER('dusty dark brown vulture feather with a ragged tip.'),
+    snowy_feather:     FEATHER('soft white snowy owl feather with small black flecks.'),
+    marsh_feather:     FEATHER('pale blue-grey crane feather with a darker grey tip.'),
+    storm_feather:     FEATHER('slate-grey storm hawk feather crackling with small blue lightning sparks along its edge.'),
+    thunderfeather:    FEATHER('huge golden thunderbird feather with electric blue edges and a bolt of lightning running down its spine, glowing brightly.'),
+    // Fangs, teeth and claws.
+    coyote_fang:       FANG('plain ivory white.'),
+    lynx_fang:         FANG('slender and sharp, cream white.'),
+    hyena_fang:        FANG('thick and chipped, yellowed bone colour.'),
+    saber_fang:        FANG('huge and saber-long, ancient ivory with frost crusted at the root.'),
+    dire_wolf_fang:    FANG('large and jagged, bone white with a faint red glow at the root.'),
+    ember_fang:        FANG('ashen grey with glowing molten-orange cracks and a small flame flickering at the tip.'),
+    lion_tooth:        'a single large pointed lion canine tooth, warm ivory with a tawny root wrapped in a band of brown leather.',
+    bear_claw:         CLAW('dark charcoal-grey black bear claw with a lighter slate-grey edge.'),
+    ancient_claw:      CLAW('enormous fossilised prehistoric claw in dark brown stone, cracked and glowing with faint violet runes.'),
+    polar_claw:        CLAW('creamy white polar bear claw tipped with frost.'),
+    primal_claw:       CLAW('battle-scarred dark grey claw with deep notches and a blood-red tip.'),
+    scorpion_claw:     'a single large scorpion pincer claw, glossy amber-orange armored shell with a dark tip.',
+    eagle_talon:       'a single curved golden-yellow eagle foot talon gripping inward, with sharp black claw tips.',
+    spectral_bone:     'a single translucent glowing pale-blue ghostly bone with silver moonlight wisps drifting off it.',
+    // Antlers, horns and tusks.
+    antler_fragment:   'a single short broken piece of tan deer antler with one pointed tine and a jagged snapped end.',
+    elk_antler:        ANTLER('large tan-brown elk antler.'),
+    caribou_antler:    ANTLER('pale tan caribou antler caked in white frost.'),
+    obsidian_antler:   ANTLER('jet-black volcanic obsidian glass antler with sharp glossy facets and a faint molten-red glow in the cracks.'),
+    moose_rack:        'a single wide flat palmate moose antler with a broad paddle and pointed tines along its edge, warm tan-brown.',
+    megaloceros_crown: 'a huge sweeping pair of giant elk antlers forming a crown, ancient bone-white with gold tips and crackling lightning glow.',
+    mountain_horn:     HORN('pale cream-grey mountain goat horn.'),
+    ram_horn:          HORN('massive battle-scarred dark brown ram horn with deep chips.'),
+    tusk_shard:        'a single small broken shard of ivory boar tusk with a jagged snapped end.',
+    hog_tusk:          TUSK('short mud-stained yellowed hog tusk.'),
+    mammoth_tusk:      TUSK('huge long ivory mammoth tusk with a crust of blue ice along its curve.'),
+    // Feet.
+    rabbits_foot:      FOOT('soft white cottontail rabbit fur.'),
+    jackrabbit_foot:   FOOT('long sandy-brown jackrabbit fur.'),
+    // Glands and venom.
+    venom_sac:         'a single small plump translucent sac of glowing yellow-green venom with a fang-shaped tip.',
+    swamp_gland:       'a single small slimy bulbous gland, murky green and toxic purple, oozing a few bubbles.',
+    cottonmouth_venom: VENOM('milky white venom with a dark olive snake coiled around it.'),
+    // Other.
+    acorn_cache:       'a small pile of plump brown acorns with their little caps, a few loose leaves tucked in.',
+    hardwood_chip:     'a single chunky splintered chip of dark oak hardwood with visible grain and a small peck hole.',
+    bandit_mask:       'a small black raccoon bandit eye mask made of grey-and-black striped fur.',
+    spirit_essence:    'a small floating orb of glowing spectral wolf spirit energy, pale white-blue with aurora-green swirls.',
+    ancient_relic:     'a small weathered stone idol carved with worn glowing rune marks, mossy grey stone.',
+};
+Object.entries(HUNT_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'hunt') throw new Error(`no hunting material ${id}`);
+    add(`hunt:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Exploration (#1172). Fieldcraft kept from the trail: a surveyor's kit, in the
+// parchment, brass and ink of the region and relic art. Each is a single
+// object; the seal has no ribbon and the ink no cork so neither reads as the
+// final_decree relic or a fishing/mining vial.
+const EXPLORE_MATERIAL_SUBJECT = {
+    survey_chalk:      'a single short squared stick of white surveyor\'s chalk, worn down at one end, with a small dusting of chalk powder.',
+    pressed_fern:      'a single flat pressed fern frond, dried soft sage green with a slightly faded tip, its leaflets laid out neatly.',
+    frayed_map_corner: 'a single torn triangular corner of an old tan parchment map with frayed edges, a dotted red trail line and a tiny compass mark.',
+    waypoint_flint:    'a single knapped dark grey flint stone with a pale arrow chipped into its face, pointing the way.',
+    compass_shard:     'a single broken wedge-shaped shard of a brass compass face showing part of the dial markings and a red needle tip.',
+    charted_vellum:    'a single sheet of cream vellum half unrolled, a neatly inked coastline map in blue and brown across it.',
+    surveyors_lens:    'a single round brass-rimmed magnifying lens with a short wooden handle, the glass pale blue with a faint glint.',
+    lantern_glass:     'a single curved pane of amber lantern glass framed in thin brass, a warm candle glow trapped inside it.',
+    trailwardens_knot: 'a single intricate looping trail knot of braided green and brown rope, its ends bound with gold thread.',
+    wayfarers_seal:    'a single round deep-crimson wax seal pressed with a gold compass-rose crest, glowing gold around its edge, its scalloped wax edge kept well inside the rim.',
+    cartographers_ink: 'a small squat glass inkwell of deep blue-black ink swirling with tiny stars, a golden quill pen dipped in it.',
+};
+Object.entries(EXPLORE_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'explore') throw new Error(`no exploration material ${id}`);
+    add(`explore:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
 // --- validate against the game registries -----------------------------------
 // Every namespaced key must be a known game key: a shop-browse gear id or a
 // catch/kill/mine result id (both uploadable), or a pet species / explore region
-// / explore relic id (all bundle-only, see src/data/activityItems.js) —
+// / explore relic / crafting material id (all bundle-only, see
+// src/data/activityItems.js) —
 // otherwise it is a typo the app will never ask for. The bundle-only keys are
 // included here but not in `isUploadableItemId`: their art ships only as a baked
 // default, never a per-guild upload.
-const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS } = require('../../src/data/activityItems.js');
+const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS, MATERIAL_ITEM_IDS } = require('../../src/data/activityItems.js');
 const knownKeys = new Set([
-    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS,
+    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS, ...MATERIAL_ITEM_IDS,
     ...[...ACHIEVEMENT_IDS].map((id) => `achievement:${id}`),
 ]);
 // Every prompt ends with the shared B3 style block; "rarity rim," is the phrase

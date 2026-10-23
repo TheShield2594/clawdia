@@ -80,6 +80,9 @@
               "at": { "description": "Cuándo se ejecuta por primera vez, p. ej. «09:00», «5pm», «2026-07-20 09:00»" },
               "in_minutes": { "description": "Minutos a partir de ahora en lugar de una hora absoluta" },
               "every": { "description": "Repetir con esta cadencia. Déjalo vacío para ejecutarla una vez." },
+              "cron": { "description": "Un horario cron en lugar de «every», p. ej. «0 9 * * 1-5» para los días laborables a las 9" },
+              "deliver": { "description": "Publica el resultado en un canal (por defecto) o te lo envía por MD" },
+              "deep": { "description": "Da a cada ejecución el margen del modo de tarea profunda: más rondas de herramientas y minutos" },
               "channel": { "description": "Dónde se publica el resultado. Por defecto, este canal." }
             }
           },

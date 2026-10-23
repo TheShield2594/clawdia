@@ -34,6 +34,18 @@ jest.mock('../src/services/seasonalEventService', () => ({ getEventCrossSystemTy
 jest.mock('../src/services/petService', () => ({
     getTotalBonus: () => 0, petCompanionLine: () => null, tryGrantRarePet: () => null,
 }));
+// The featured spot rotates by UTC date; on a day it lands on the test user's
+// pond the +25% bonus stacks onto every payout. Pin it somewhere else.
+jest.mock('../src/data/featuredRotation', () => {
+    const actual = jest.requireActual('../src/data/featuredRotation');
+    return {
+        ...actual,
+        getDailyFeatured: jest.fn(guildId => ({
+            ...actual.getDailyFeatured(guildId),
+            fishSpot: actual.FEATURED_FISH_SPOTS.find(s => s.id === 'deep_sea'),
+        })),
+    };
+});
 jest.mock('../src/services/fishService', () => {
     const actual = jest.requireActual('../src/services/fishService');
     return {

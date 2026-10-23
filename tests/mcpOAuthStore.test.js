@@ -131,6 +131,12 @@ describe('saving a grant', () => {
         await expect(saveGrant('g1', 'gone', { clientId: 'cid' })).resolves.toBe(false);
     });
 
+    test('given the flow\'s url, it lands only on an entry still at that url', async () => {
+        await saveGrant('g1', 'linear', { clientId: 'cid' }, { url: 'https://mcp.linear.app/sse' });
+        const [filter] = Guild.updateOne.mock.calls[0];
+        expect(filter).toEqual({ guildId: 'g1', 'ai.mcpServers': { $elemMatch: { name: 'linear', url: 'https://mcp.linear.app/sse' } } });
+    });
+
     test('clearing one leaves the connection behind, unauthenticated', async () => {
         await clearGrant('g1', 'linear');
 

@@ -37,6 +37,96 @@ cannot see it, so it says so instead of answering from the caption alone. The
 same happens to an image too large or too numerous to send. Nothing is
 downloaded for a model that cannot use it.
 
+**Voice messages**:
+
+With **Listen to voice messages** on, a voice message or audio clip sent to the
+AI is transcribed and answered like typed text. That means in a DM, or as a
+reply to one of the bot's messages in a server, since a voice message cannot
+carry a mention. The transcript is the turn: the model is told it was spoken,
+and the history, memory and conversation search all keep the words rather than
+the audio.
+
+Transcription uses the server's own keys, with no new setting: Gemini for a
+server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
+Gemini (`gemini-3.8-flash`). A clip only goes to a service that reads its
+format, so raw AAC goes to Gemini, and a transcription that fails on one
+service is tried once on the other. A server on Claude, OpenRouter or Ollama
+needs an OpenAI or Gemini key for it. Each clip is a separate charge from that
+provider, recorded in the AI usage ledger and counted toward the monthly budget
+like any other call: a server that is out of budget is told so before anything
+is transcribed. Clips over ten minutes or 19 MB are refused with a reason rather
+than transcribed, and the clip is downloaded through the same SSRF guard as
+images.
+
+**Spoken replies**:
+
+**Spoken replies** reads the AI's answer aloud and posts the audio after the
+text. *When spoken to* does it for a reply to a voice message; *Always in DMs*
+also does it for every reply in a DM. The text is always posted too, so the
+answer stays readable and searchable, and the audio only follows once the reply
+is final: a streamed reply is read once it has finished, and a reply the
+outbound moderation check withheld is never read.
+
+Speech uses the same keys as transcription, in the same order: OpenAI's
+`gpt-4o-mini-tts`, posted as a Discord voice message, or Gemini's speech model
+(`GEMINI_TTS_MODEL`), posted as a WAV attachment. Markdown, links, mentions and
+code are left out of what is read, and only about the first 1,500 characters
+are spoken, ending with "the rest is in the text". Each spoken reply is recorded
+in the usage ledger and counts toward the monthly budget. If speech fails, or
+the server is out of budget, the reply is the text alone, with no error.
+
+**Images**:
+
+With **Let the AI make images** on, the model has a `generate_image` tool:
+"draw a logo for the guild" or "make a banner for Friday's event" gets a picture
+posted after the reply, with the prompt as its alt text. It takes a prompt and a
+shape (square, landscape or portrait) and makes one image per call.
+
+**Image service** picks which service draws first: OpenAI, Gemini, OpenRouter
+or Higgsfield, each with the server's own key for it (OpenRouter's is the chat
+key field; Higgsfield's is under the image settings, as `KEY_ID:KEY_SECRET`). On
+**Automatic** it follows the chat provider the way voice does: Gemini for a
+server on Gemini, OpenRouter for one on OpenRouter, otherwise OpenAI. Whichever
+goes first, every other service the server has a key for is tried after it when
+it fails.
+
+Each service has a model field. OpenAI takes a gpt-image model (default
+`gpt-image-1`, at medium quality, or `OPENAI_IMAGE_MODEL`); Gemini an image model
+(default `gemini-2.5-flash-image`, or `GEMINI_IMAGE_MODEL`); DALL·E and Imagen are
+refused. OpenRouter takes any image model's `author/model` ID (default
+`google/gemini-2.5-flash-image`) and draws through its `/api/v1/images`
+endpoint. Higgsfield takes a text-to-image endpoint ID (default
+`higgsfield-ai/soul/v2/standard`); its requests are queued, so the bot submits,
+polls until the picture is ready, and cancels a request still queued when the
+reply runs out of time.
+
+Cost: OpenRouter reports what each image cost, and Higgsfield's estimate
+endpoint is asked before each one, so both count toward the monthly cost limit
+at that price. OpenAI and Gemini are priced from the table for gpt-image-1,
+gpt-image-1-mini and Gemini image models; another model there is counted in
+tokens but not in cost. With no key for any of them the tool is not offered. A prompt the service
+refuses is not retried on another one; the model is told it was refused and
+says so. An image costs far more than a reply, so each is recorded in the usage
+ledger and counted toward the monthly budget, a server that is out of budget
+gets no image, each member gets five an hour, and one reply carries at most two.
+It needs no approval, since it changes nothing but the conversation, and it is
+offered to `/ai task` and scheduled tasks too, where the guild's five an hour and
+the hourly tool budget bound it.
+
+**Sub-agents in deep tasks**:
+
+A deep task (`/ai task`, or a scheduled task in deep mode) can hand independent
+pieces of its work to sub-agents with a `delegate` tool — "compare these four
+products" becomes four lookups running at once, each with a fresh context, and
+the task writes its report from their answers. Up to four sub-agents at a time
+and eight per task, each with six tool rounds and at most four minutes, inside
+the task's own clock. Sub-agents only look things up: they get the read-only
+tools (web access, and a connection's tools only where they would run in a
+scheduled task without asking), never in-channel actions, images, notes or
+`delegate` itself. Their tool calls come out of the task's own allowance, they
+take no message or deep-task slot of their own, and their tokens count toward
+the monthly budget. Their calls show on the task's progress line and footer.
+
 **Knowing its own commands**:
 
 Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because
@@ -109,7 +199,7 @@ unless someone hand-added the word, and the model then answers blind even though
 the fact was on file.
 
 So the knowledge base has an optional second tier: **semantic retrieval**, off
-by default under **AI → Chat**. With it on, each entry is turned into a vector
+by default under **AI → Knowledge Base**. With it on, each entry is turned into a vector
 when it is written and the question into one when it is asked, and the nearest
 few by meaning are unioned with the keyword hits before the prompt is assembled
 — so the paraphrase reaches the entry, and nothing about the keyword tier or the
@@ -154,16 +244,26 @@ model is told the call was refused and answers from what it has.
 
 Tools that write something wait for a person. The **Approval** setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until
-the person who asked, or anyone who can manage the server, says so. A guild
-can limit that to members who can manage the server. That matters when a
-connection runs on an admin's token, because otherwise any member can ask for a
-call and approve it. Adding a first connection turns approval on for writes,
+someone who can manage the server says so. A guild can let the person who asked
+approve their own call instead, which catches a model that was talked into
+something but not a member who wants the call made. A connection signed in with
+OAuth — somebody's own mailbox or calendar — is offered only to members who can
+manage the server, and any other connection can be limited the same way with
+its **Only members who can manage this server** switch (`managers_only` in the
+config file). Adding a first connection turns approval on for writes,
 since connecting a server is not by itself consent to unattended ones.
 
 It runs the other way too. A tool that gets halfway and needs one more fact can
 ask, and the question appears in the channel as a form to fill in — bounded to
 two questions a reply, and labelled with which server is asking, because a real
 one will not ask for a password or a key.
+
+A scheduled task has nobody to click those buttons, so a tool that needs
+approval is refused there. Each connection has a **Run without asking in
+scheduled tasks** list for the exceptions: name `create_event` on a calendar
+connection and "every morning, put today's classes on my calendar" can write
+without anyone awake, while the same call from a chat message still asks. The
+list is only read by scheduled runs, and never covers the bot's own tools.
 
 Approvals and the activity rollup below both need the bot to be the one making
 the call, which on Claude it is not by default — Anthropic's connector opens the
@@ -225,6 +325,12 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `command` instead of `url` runs the server as a local process and speaks MCP
+  over its stdin/stdout — the transport most servers ship with. Config file
+  only ([details](SETUP_GUIDE.md#mcp-servers))
+- `allow_private: true` lets an entry reach a server on your own network — a
+  LAN address or plain `http://` — which no dashboard connection can
+  ([details](SETUP_GUIDE.md#mcp-servers))
 - `guilds: ["<server id>", …]` limits an entry to the Discord servers named;
   without it, every server with AI on can use the file's credentials
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
@@ -238,6 +344,15 @@ Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers)
 - Set an AI chat channel in dashboard
 - Users chat naturally, bot responds to every message and @-mentions/replies anywhere
 - Bot shows typing indicator while processing
+
+**Direct messages:**
+- Set `AI_DM_GUILD_ID` to your server's ID and its admins (Manage Server) can DM
+  the bot instead of mentioning it in a channel
+- A DM is answered as though it were sent in that server: its provider, system
+  prompt, memories, knowledge base, MCP connections and budget. Approvals,
+  reminders and scheduled tasks set from a DM come back to the DM
+- Every DM goes to the AI, so no mention is needed. Nobody else gets an answer,
+  and nothing besides the AI (leveling, automod, quests) runs in DMs
 
 **Customization:**
 
@@ -254,7 +369,59 @@ Clawdia pins facts she learns about a user across conversations. `/ai memories`
 lists them and `/ai memories delete <number>` removes one. React 📌 to one of her
 messages to pin it yourself; she can also ask to save one herself with the
 `save_memory` tool, which posts approval buttons and saves nothing until someone
-clicks. Ten per user, per server.
+clicks, and drop one that has gone stale with `forget_memory`. Ten per user, per
+server by default; **Memories per member** under **AI → Knowledge Base** raises it as far
+as fifty. Every memory rides in every reply's prompt, so more of them cost more
+per message.
+
+**Save memories without asking** turns the approval buttons off for those two
+tools. The model then remembers what you tell it about yourself as it goes, and
+replaces what has changed, the way a personal assistant would. It is meant for a
+server you run for yourself: it only ever saves what the person it is replying
+to said about themselves, but nobody reviews it. It needs AI actions on.
+
+A scheduled task carries the memories of the person who set it up, so "plan my
+week" knows whose week it is.
+
+**Learning**:
+
+With **Let the AI learn** on, the model gets a `learn` tool. After it finishes
+something that took several steps, or after you correct it, it writes down how
+to do it right next time as a note in the knowledge base, tagged `learned`. The
+notes come back through the same retrieval as every other entry (semantic tier
+included) when a later question is about the same thing. A note is keyed by its
+title, so learning the same thing again rewrites the note instead of adding
+another. The notes are guild-wide, so the tool is only offered to members with
+Manage Server, never in scheduled tasks, and capped at 200 notes a server. Read,
+edit or delete them in the dashboard's knowledge base like any other entry.
+
+**Web access**:
+
+With **Enable web access** on, the model has a `read_webpage` tool that fetches
+one public page and reads its text — a search result whose snippet is not
+enough, or a link somebody pasted. The URL is the model's choice, so it goes
+through the same SSRF guard as every dashboard URL: private and reserved
+addresses are refused, on every redirect. Pages that need a login or JavaScript
+come back empty; for those, an operator can run Playwright's MCP server as an
+optional browser sidecar
+([setup](SETUP_GUIDE.md#a-browser-for-the-ai)).
+
+With `SEARXNG_URL` set by the operator as well, the model also has a
+`web_search` tool over that SearXNG instance. It returns titles, URLs and
+snippets, labelled as third-party text the model must not take instructions
+from, and the model is told to cite the URLs it uses. It is read-only, so it
+needs no approval and is offered to scheduled tasks too. Setup is in
+[SETUP_GUIDE.md](SETUP_GUIDE.md#web-search-searxng).
+
+**Searchable conversation history**:
+
+The chat keeps the last few turns per channel and a rolling summary, which is
+enough context for a reply but not for "what did we decide about the trip last
+month?". With **Searchable conversation history** on, every AI turn is also
+written to a log kept for a year, and the model gets a `search_conversations`
+tool over it — keyword search across every channel and DM. A member only ever
+searches their own conversations; the filter is the person asking, not anything
+the model passes. `/mydata` exports and erases the log with everything else.
 
 Older turns are not simply forgotten when they fall past the history window:
 what drops out is folded into a short rolling summary of the conversation, which
@@ -314,7 +481,7 @@ reachable from inside a story.
 
 ### Event Commentary
 
-With **Enable event commentary** switched on under **AI → Chat**, the bot adds
+With **Enable event commentary** switched on under **AI → Abilities**, the bot adds
 two or three sentences of colour commentary — in the server's own configured
 persona — to the announcements it already posts when a war, an economy season,
 or the weekly champion competition resolves.
@@ -1103,7 +1270,7 @@ _Generated by `npm run docs:panels` from the dashboard sidebar and `src/dashboar
 | Section | What it configures |
 | --- | --- |
 | **Command Policies** | Restrict or allow commands by role, channel, or time of day |
-| **Ask Clawdia** | Configure Clawdia's chat, knowledge base, summaries, and per-channel personas for your server |
+| **Ask Clawdia** | Configure Clawdia's chat, what it can do, its knowledge base, and its summaries for your server |
 | **Temp Voice** | Members join a lobby channel and instantly get their own private voice channel |
 
 ### Feeds & Automation

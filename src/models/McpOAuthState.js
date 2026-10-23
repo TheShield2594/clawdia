@@ -38,6 +38,11 @@ const mcpOAuthStateSchema = new Schema({
     guildId:   { type: String, required: true },
     // Which of the guild's MCP servers this flow is for.
     server:    { type: String, required: true },
+    // The url the server was at when the flow started. The grant is saved only
+    // onto an entry still at it (oauthStore's saveGrant), so one repointed
+    // mid-flow never receives a token issued for somewhere else. Absent on a
+    // flow started before this was recorded, which the callback refuses.
+    url:       { type: String, default: null },
     verifier:  { type: String, required: true, set: encryptSecret },
     // Where the browser will come back to. Stored rather than recomputed
     // because the token exchange has to send back the identical string, and a

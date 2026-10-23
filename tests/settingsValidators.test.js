@@ -473,6 +473,42 @@ describe('validateHeistUpdate', () => {
 });
 
 describe('validateAiUpdate', () => {
+    test('ai.imageService is one of the known services', () => {
+        const { IMAGE_SERVICES } = require('../src/config/aiImages');
+        for (const service of IMAGE_SERVICES) expect(validateAiUpdate({ 'ai.imageService': service })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageService': 'midjourney' }))
+            .toBe(`ai.imageService must be one of: ${IMAGE_SERVICES.join(', ')}`);
+        expect(validateAiUpdate({ ai: { imageService: 1 } })).toMatch(/ai\.imageService must be one of/);
+    });
+
+    test('ai.imageModels takes image models for the service, or empty for the default', () => {
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'gpt-image-1-mini', 'ai.imageModels.gemini': 'gemini-2.5-flash-image' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openai': null, 'ai.imageModels.gemini': '' })).toBeNull();
+        expect(validateAiUpdate({ ai: { imageModels: { openai: 'gpt-image-2' } } })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'gpt-4o' })).toMatch(/not an OpenAI image model/);
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'dall-e-3' })).toMatch(/DALL·E is not supported/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'imagen-4.0-generate-001' })).toMatch(/Imagen is not supported/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini-2.0-flash' })).toMatch(/not a Gemini image model/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini image; drop' })).toMatch(/must be a model name/);
+        expect(validateAiUpdate({ 'ai.imageModels.midjourney': 'v7' })).toMatch(/no "midjourney" service/);
+        expect(validateAiUpdate({ 'ai.imageModels': ['gpt-image-1'] })).toMatch(/must be \{ openai, gemini, openrouter, higgsfield \}/);
+    });
+
+    test('OpenRouter takes an author/model slug, Higgsfield a plain endpoint path', () => {
+        expect(validateAiUpdate({ 'ai.imageModels.openrouter': 'black-forest-labs/flux.2-pro' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openrouter': 'flux' })).toMatch(/not an OpenRouter model ID/);
+        expect(validateAiUpdate({ 'ai.imageModels.higgsfield': 'higgsfield-ai/soul/v2/standard' })).toBeNull();
+        for (const bad of ['soul', '../requests/x', 'a//b', 'a/./b', '/abs/path', 'a/b?x=1']) {
+            expect(validateAiUpdate({ 'ai.imageModels.higgsfield': bad })).not.toBeNull();
+        }
+    });
+
+    test('ai.higgsfieldKey is a key ID and secret joined by a colon', () => {
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'abc123:s3cr3t' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'just-one-part' })).toMatch(/KEY_ID:KEY_SECRET/);
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'a:b:c' })).toMatch(/KEY_ID:KEY_SECRET/);
+    });
+
     it('accepts a well-formed update', () => {
         expect(validateAiUpdate({
             'ai.mcpConfirm': CONFIRM_MODES[0],
@@ -481,6 +517,14 @@ describe('validateAiUpdate', () => {
             'ai.monthlyCostLimit': 12.5,
             'ai.contextTokens': 128000,
         })).toBeNull();
+    });
+
+    it('accepts each spoken-reply mode and refuses any other (#1231)', () => {
+        const { VOICE_REPLY_MODES } = require('../src/config/aiVoice');
+        for (const mode of VOICE_REPLY_MODES) expect(validateAiUpdate({ 'ai.voiceReplies': mode })).toBeNull();
+        expect(validateAiUpdate({ 'ai.voiceReplies': 'shout' }))
+            .toBe(`ai.voiceReplies must be one of: ${VOICE_REPLY_MODES.join(', ')}`);
+        expect(validateAiUpdate({ ai: { voiceReplies: 3 } })).toMatch(/ai\.voiceReplies must be one of/);
     });
 
     it('rejects a confirm mode and a route the enum does not know', () => {

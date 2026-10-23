@@ -7,6 +7,8 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES, MCP_APPROVERS } = require('../../../config/mcpServers');
+const { VOICE_REPLY_MODES } = require('../../../config/aiVoice');
+const { IMAGE_SERVICES, IMAGE_SERVICE_ORDER, imageModelError, higgsfieldKeyError } = require('../../../config/aiImages');
 const { isValidSlug } = require('../../lib/publicData');
 const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
@@ -369,6 +371,38 @@ function validateMcpApprover(value) {
     return null;
 }
 
+// Same reasoning for when replies are spoken (#1231): an unknown mode would be
+// refused by the enum on save, and this turns that into a message for the form.
+function validateVoiceReplies(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !VOICE_REPLY_MODES.includes(value)) {
+        return `ai.voiceReplies must be one of: ${VOICE_REPLY_MODES.join(', ')}`;
+    }
+    return null;
+}
+
+// Same again for which service draws images first, and the model each draws
+// with: a name that cannot work through the endpoint images.js calls is caught
+// here, against the field, rather than at the first image somebody asks for.
+function validateImageService(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !IMAGE_SERVICES.includes(value)) {
+        return `ai.imageService must be one of: ${IMAGE_SERVICES.join(', ')}`;
+    }
+    return null;
+}
+
+function validateImageModels(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'object' || Array.isArray(value)) return `ai.imageModels must be { ${IMAGE_SERVICE_ORDER.join(', ')} }`;
+    for (const [service, model] of Object.entries(value)) {
+        if (!IMAGE_SERVICE_ORDER.includes(service)) return `ai.imageModels has no "${service}" service`;
+        const error = imageModelError(service, model);
+        if (error) return error;
+    }
+    return null;
+}
+
 // MCP connections are managed through api/mcpServers.js and the OAuth routes,
 // never through here (#1139). Those routes validate the URL, cap the list,
 // encrypt the token and — the part that matters — never take an `oauth`
@@ -436,6 +470,43 @@ function validateAiUpdate(updates) {
             }
         }
 
+        let voiceReplies;
+        if (key === 'ai.voiceReplies') voiceReplies = value;
+        else if (isWholeAi) voiceReplies = value.voiceReplies;
+
+        if (voiceReplies !== undefined) {
+            const error = validateVoiceReplies(voiceReplies);
+            if (error) return error;
+        }
+
+        let imageService;
+        if (key === 'ai.imageService') imageService = value;
+        else if (isWholeAi) imageService = value.imageService;
+
+        if (imageService !== undefined) {
+            const error = validateImageService(imageService);
+            if (error) return error;
+        }
+
+        let imageModels;
+        if (key === 'ai.imageModels') imageModels = value;
+        else if (key.startsWith('ai.imageModels.')) imageModels = { [key.slice('ai.imageModels.'.length)]: value };
+        else if (isWholeAi) imageModels = value.imageModels;
+
+        if (imageModels !== undefined) {
+            const error = validateImageModels(imageModels);
+            if (error) return error;
+        }
+
+        let higgsfieldKey;
+        if (key === 'ai.higgsfieldKey') higgsfieldKey = value;
+        else if (isWholeAi) higgsfieldKey = value.higgsfieldKey;
+
+        if (higgsfieldKey !== undefined) {
+            const error = higgsfieldKeyError(higgsfieldKey);
+            if (error) return error;
+        }
+
         let context;
         if (key === 'ai.contextTokens') context = value;
         else if (isWholeAi) context = value.contextTokens;
@@ -443,6 +514,33 @@ function validateAiUpdate(updates) {
         if (context !== undefined) {
             const error = validateContextTokens(context);
             if (error) return error;
+        }
+
+        let fallbacks;
+        if (key === 'ai.fallbacks') fallbacks = value;
+        else if (key.startsWith('ai.fallbacks.')) return 'ai.fallbacks is saved as a whole list';
+        else if (isWholeAi) fallbacks = value.fallbacks;
+
+        if (fallbacks !== undefined) {
+            const error = validateFallbacks(fallbacks);
+            if (error) return error;
+        }
+    }
+    return null;
+}
+
+const FALLBACK_PROVIDERS = ['openai', 'gemini', 'anthropic', 'ollama', 'openrouter'];
+
+// The backup providers (`ai.fallbacks`): at most two, each a known provider and
+// an optional model name of a sane length.
+function validateFallbacks(value) {
+    if (!Array.isArray(value)) return 'ai.fallbacks must be a list';
+    if (value.length > 2) return 'ai.fallbacks can list at most two backup providers';
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'each backup must be { provider, model }';
+        if (!FALLBACK_PROVIDERS.includes(entry.provider)) return `"${entry.provider}" is not a provider`;
+        if (entry.model != null && (typeof entry.model !== 'string' || entry.model.length > 100)) {
+            return 'a backup model must be a name of at most 100 characters';
         }
     }
     return null;

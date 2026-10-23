@@ -96,7 +96,7 @@ describe('the event handler', () => {
 
     beforeEach(() => {
         getGuildSettings.mockResolvedValue({
-            ai: { enabled: true, channelPersonas: [] },
+            ai: { enabled: true },
             leveling: { enabled: false },
             moderation: { enabled: false },
             suggestions: { enabled: false },
@@ -192,7 +192,7 @@ describe('the chat transport', () => {
         expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'who are you?' }));
         expect(retrieveKnowledge).toHaveBeenCalledWith('g1', 'who are you?', expect.anything());
         expect(appendHistory).toHaveBeenCalledWith(
-            'g1', 'c1', 'u1', 'who are you?', expect.any(String), 20, expect.anything(),
+            'g1', 'c1', 'u1', 'who are you?', expect.any(String), 20, expect.anything(), { archive: false },
         );
     });
 

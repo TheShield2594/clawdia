@@ -796,9 +796,13 @@ async function prepareMcpToolkit(guildServers = [], {
         if (decision?.approved) return { approved: true };
         return {
             approved: false,
-            message: decision?.timedOut
-                ? 'Nobody approved this tool call in time, so it was not run. Say so, and offer to try again.'
-                : 'The user declined to run this tool. Do not try it again — carry on without it, or ask what they would like instead.'
+            // A confirmer that is a policy rather than a person (a scheduled
+            // run's) knows better than this does why it said no.
+            message: typeof decision?.message === 'string' && decision.message
+                ? decision.message
+                : decision?.timedOut
+                    ? 'Nobody approved this tool call in time, so it was not run. Say so, and offer to try again.'
+                    : 'The user declined to run this tool. Do not try it again — carry on without it, or ask what they would like instead.'
         };
     }
 
@@ -937,8 +941,16 @@ async function prepareMcpToolkit(guildServers = [], {
         // turn stopped waiting.
         if (target.run) {
             let settled = false;
+            // A bot tool that makes a file (generate_image, #1229) offers it the
+            // way a server's result does. Only an explicit yes counts here: a
+            // turn with no listener has nowhere to post it, and a tool told
+            // otherwise would say a picture was posted that never was.
+            const runContext = {
+                attach: file => emit({ ...describe, type: 'attachment', ...file }) === true,
+                deadline
+            };
             const running = Promise.resolve()
-                .then(() => target.run(args ?? {}))
+                .then(() => target.run(args ?? {}, runContext))
                 .then(value => { settled = true; return String(value ?? ''); });
             // A run that fails after the turn stopped waiting for it has nobody
             // left to tell, and an unhandled rejection would take the process
@@ -1062,7 +1074,15 @@ async function prepareMcpToolkit(guildServers = [], {
     // request" rather than counting the meta-tool as a tool.
     // `maxRounds` rides on the toolkit because the provider loops are what
     // enforce it, and the toolkit is the only thing they are already handed.
-    return { definitions, servers: reached, deferred: deferred.map(entry => entry.name), call, maxRounds };
+    //
+    // `expired` is the same clock `call` refuses on, asked by the provider
+    // loops before they start another round (#1238). A turn whose time is up
+    // gets one last request with no tools on it, so the model answers from what
+    // it has instead of asking for calls that would only be refused.
+    return {
+        definitions, servers: reached, deferred: deferred.map(entry => entry.name), call, maxRounds,
+        expired: () => Date.now() >= deadline
+    };
 }
 
 /**
@@ -1151,9 +1171,42 @@ function roundsFor(toolkit) {
     return toolkit?.maxRounds ?? MAX_TOOL_ROUNDS;
 }
 
+/**
+ * Whether this round may offer the model tools.
+ *
+ * Not on the last permitted round, which leaves the model nothing to do but
+ * answer, so a turn cannot end on an unanswered tool call. And not once the
+ * turn's deadline has passed (#1238): every call would be refused, so offering
+ * them only buys more paid rounds of the model asking anyway.
+ */
+function offersTools(toolkit, round) {
+    if (!toolkit || round >= roundsFor(toolkit)) return false;
+    return !(typeof toolkit.expired === 'function' && toolkit.expired());
+}
+
+/**
+ * `error` with the usage of the rounds that finished before it, so the caller
+ * can still record them (#1238). A turn cancelled or failed mid-loop was billed
+ * for every request that came back, and dropping those would let an abandoned
+ * turn spend the guild's money off the ledger. An error that already says what
+ * it cost keeps its own number.
+ */
+function withUsage(error, usage) {
+    if (usage && error && typeof error === 'object' && error.usage === undefined) {
+        try {
+            error.usage = usage;
+        } catch {
+            // A frozen error has nowhere to put it; the throw matters more.
+        }
+    }
+    return error;
+}
+
 module.exports = {
     prepareMcpToolkit,
     roundsFor,
+    offersTools,
+    withUsage,
     prewarmMcpServers,
     toolkitFor,
     renderResult,

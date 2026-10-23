@@ -16,6 +16,12 @@ const aiUsageSchema = new Schema({
     // that predate this field.
     cachedInputTokens: { type: Number, default: 0 },
     requestCount: { type: Number, default: 0 },
+    // USD the service itself reported charging, for the calls priced per call
+    // rather than per token (OpenRouter and Higgsfield images), and how many of
+    // the row's requests reported it. services/ai/usage.js uses the sum only
+    // when every request in the row reported one.
+    reportedCost: { type: Number, default: 0 },
+    reportedCostRequests: { type: Number, default: 0 },
     updatedAt:    { type: Date, default: Date.now }
 });
 

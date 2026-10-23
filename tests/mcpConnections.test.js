@@ -28,12 +28,14 @@ const { McpError } = require('../src/services/ai/mcp/client');
 const { deferred } = require('./helpers/deferred');
 const {
     entryFor,
+    mcpClientFor,
     clientFor,
     withSession,
     withServerLimit,
     cachedList,
     primeList,
     resetMcpCache,
+    resetOAuthConnection,
     LIST_TTL_MS,
     STALE_TTL_MS,
     MAX_PARALLEL_PER_SERVER,
@@ -95,6 +97,21 @@ describe('what shares a pooled connection', () => {
         expect(entryFor(impostor)).not.toBe(entryFor(oauthServer('g1')));
     });
 
+    // Connect and disconnect are any guild admin's to call; neither may close
+    // another guild's sessions, or the stdio processes shared by every guild.
+    test('a login change drops that guild\'s grant and the unauthenticated entry, nothing else', () => {
+        const unauthenticated = { name: 'linear', connection: { url: 'https://mcp.example.com/mcp', authorizationToken: null } };
+        const mine = entryFor(oauthServer('g1'));
+        const before = entryFor(unauthenticated);
+        const theirs = entryFor(oauthServer('g2'));
+
+        resetOAuthConnection('https://mcp.example.com/mcp', 'g1', 'linear');
+
+        expect(entryFor(oauthServer('g1'))).not.toBe(mine);
+        expect(entryFor(unauthenticated)).not.toBe(before);
+        expect(entryFor(oauthServer('g2'))).toBe(theirs);
+    });
+
     test('an OAuth connection gets a client that can fetch a token', () => {
         const entry = entryFor(oauthServer('g1'));
         expect(typeof clientFor(entry, oauthServer('g1')).options.getAccessToken).toBe('function');
@@ -102,6 +119,29 @@ describe('what shares a pooled connection', () => {
 
     test('and a static one does not', () => {
         expect(clientFor(entryFor(SERVER), SERVER).options.getAccessToken).toBeNull();
+    });
+
+    // A client allowed onto the operator's private network skips the SSRF
+    // guard, so it must never be the one a dashboard entry with the same URL
+    // and token is handed.
+    test('a local process is pooled by its command, args and env, and gets a stdio client', () => {
+        const local = (args, env = {}) => ({
+            name: 'vault',
+            connection: { url: 'stdio:vault', authorizationToken: null, oauth: null, stdio: { command: 'npx', args, env } }
+        });
+        expect(entryFor(local(['a']))).toBe(entryFor(local(['a'])));
+        expect(entryFor(local(['a']))).not.toBe(entryFor(local(['b'])));
+        expect(entryFor(local(['a'], { T: '1' }))).not.toBe(entryFor(local(['a'], { T: '2' })));
+
+        const { McpStdioClient } = require('../src/services/ai/mcp/stdio');
+        expect(mcpClientFor(local(['a']))).toBeInstanceOf(McpStdioClient);
+    });
+
+    test('a private-network connection is never pooled with one that is not', () => {
+        const privateServer = { ...SERVER, connection: { ...SERVER.connection, allowPrivate: true } };
+        expect(entryFor(privateServer)).not.toBe(entryFor(SERVER));
+        expect(clientFor(entryFor(privateServer), privateServer).options.privateNetwork).toBe(true);
+        expect(clientFor(entryFor(SERVER), SERVER).options).not.toHaveProperty('privateNetwork');
     });
 });
 

@@ -1,9 +1,9 @@
 
 // The AI panel (#935): the provider fields on the Chat tab, the knowledge base,
-// the scheduled summaries, the per-channel personas, the full-screen prompt
-// editor and the token-usage widget.
+// the scheduled summaries, the full-screen prompt editor and the token-usage
+// widget on the Usage tab.
 //
-// One file for five inner tabs because they are one panel and one save: every
+// One file for every inner tab because they are one panel and one save: every
 // tab here posts through the `ai` section, which is also why the MCP tab's own
 // Save button (panel-mcp.js) calls saveSettings('ai').
 
@@ -17,8 +17,20 @@ const AI_MODEL_DEFAULTS = {
 
 function updateAiProviderUI() {
     const provider = document.getElementById('ai-provider').value;
+    // The backups' keys too: a backup provider is only tried with a key of
+    // this server's own, and a hidden field is one nobody can fill in.
+    const inUse = new Set([provider]);
+    ['ai-fallback-1-provider', 'ai-fallback-2-provider'].forEach(id => {
+        const select = document.getElementById(id);
+        if (select && select.value) inUse.add(select.value);
+    });
+    // And the image service's, with images on: a server that draws with
+    // OpenRouter needs somewhere to put that key even if it chats elsewhere.
+    const images = document.getElementById('ai-image-generation');
+    const imageService = document.getElementById('ai-image-service');
+    if (images && images.checked && imageService && imageService.value !== 'auto') inUse.add(imageService.value);
     document.querySelectorAll('.ai-key-field').forEach(el => {
-        el.style.display = el.dataset.provider === provider ? '' : 'none';
+        el.style.display = inUse.has(el.dataset.provider) ? '' : 'none';
     });
     const hint = document.getElementById('ai-model-hint');
     if (hint) hint.textContent = 'Default: ' + (AI_MODEL_DEFAULTS[provider] || '');
@@ -393,95 +405,6 @@ async function deleteSummaryJob(jobId) {
     }
 }
 
-// ── AI Personas ───────────────────────────────────────────────────────────
-var _personas = boot('personas');
-
-function updatePersonaChannelWarning() {
-    const aiChannel = document.getElementById('ai-channel');
-    const warning = document.getElementById('persona-channel-warning');
-    if (!aiChannel || !warning) return;
-    warning.style.display = aiChannel.value ? '' : 'none';
-}
-
-onPanel('ai', function() {
-    const aiChannel = document.getElementById('ai-channel');
-    if (aiChannel) aiChannel.addEventListener('change', updatePersonaChannelWarning);
-});
-
-function renderPersonas() {
-    updatePersonaChannelWarning();
-    const container = document.getElementById('personas-list');
-    if (!container) return;
-    if (!_personas.length) {
-        container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No personas configured</h3><p>Add a persona below to give the AI a distinct identity in specific channels.</p></div>';
-        return;
-    }
-    container.innerHTML = '';
-    _personas.forEach(function(p) {
-        const div = document.createElement('div');
-        div.className = 'list-item';
-        const chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : escHtml(p.channelId);
-        const preview = p.systemPrompt.length > 120 ? p.systemPrompt.slice(0, 120) + '…' : p.systemPrompt;
-        div.innerHTML =
-            '<div style="min-width:0;flex:1;">' +
-                '<strong>' + escHtml(p.personaName) + '</strong> <span style="color:var(--text-mute);font-size:.85rem;">(' + chanName + ')</span>' +
-                '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
-            '</div>' +
-            '<button class="btn btn-danger btn-sm" data-action="persona-remove" data-channel-id="' + escHtml(p.channelId) + '">Remove</button>';
-        container.appendChild(div);
-    });
-}
-
-async function addPersona() {
-    const guildId = BOOT.guildId;
-    const channelId = document.getElementById('persona-channel').value;
-    const personaName = document.getElementById('persona-name').value.trim();
-    const systemPrompt = document.getElementById('persona-prompt').value.trim();
-    if (!channelId || !personaName || !systemPrompt) { toast('All fields are required', 'error'); return; }
-    try {
-        const resp = await apiFetch('/api/v1/guild/' + guildId + '/persona', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelId: channelId, personaName: personaName, systemPrompt: systemPrompt })
-        });
-        const data = await resp.json();
-        if (resp.ok) {
-            toast('Persona saved', 'success');
-            document.getElementById('persona-channel').value = '';
-            document.getElementById('persona-name').value = '';
-            document.getElementById('persona-prompt').value = '';
-            _personas = data.personas || [];
-            renderPersonas();
-        } else {
-            toast(data.error || 'Failed to save persona', 'error');
-        }
-    } catch (e) {
-        console.error(e);
-        toast('An error occurred', 'error');
-    }
-}
-
-async function removePersona(channelId) {
-    const ok = await showConfirm({ title: 'Remove persona', body: 'Remove this channel persona? The AI will revert to the default system prompt for this channel.', okText: 'Remove' });
-    if (!ok) return;
-    const guildId = BOOT.guildId;
-    try {
-        const resp = await apiFetch('/api/v1/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
-        if (resp.ok) {
-            toast('Persona removed', 'success');
-            _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
-            renderPersonas();
-        } else {
-            toast('Failed to remove persona', 'error');
-        }
-    } catch (e) {
-        console.error(e);
-        toast('An error occurred', 'error');
-    }
-}
-
-// Initialize personas when the AI panel arrives (data came with the bootstrap)
-onPanel('ai', renderPersonas);
 // ── Prompt editor: char counter + full-screen modal ─────────────────
 function updatePromptCount(textareaId) {
     const ta = document.getElementById(textareaId);
@@ -551,7 +474,6 @@ function closePromptEditor(commit) {
 // Initialize counters when the AI panel arrives
 onPanel('ai', function() {
     updatePromptCount('ai-prompt');
-    updatePromptCount('persona-prompt');
 });
 
 // ── AI Token Usage ──────────────────────────────────────────────────
@@ -726,13 +648,11 @@ onPanel('ai', function(aiPanel) {
 
 registerPanelActions({
     click: {
-        'add-persona':            () => addPersona(),
         'add-summary-job':        () => addSummaryJob(),
         'save-daily-digest':      () => saveDailyDigest(),
         'retry-load-summary-jobs': () => retryLoadSummaryJobs(),
         'close-prompt-editor':    () => closePromptEditor(false),
         'save-prompt-editor':     () => closePromptEditor(true),
-        'persona-remove':    (el, d) => removePersona(d.channelId),
         'summary-delete':    (el, d) => deleteSummaryJob(d.jobId),
         'prompt-edit':       (el, d) => openPromptEditor(d.promptTarget, d.promptTitle),
     },
@@ -742,6 +662,12 @@ registerPanelActions({
     },
     change: {
         'ai-provider': () => updateAiProviderUI(),
+        // The service and model fields only matter with images on.
+        'ai-image-generation': el => {
+            const options = document.getElementById('ai-image-options');
+            if (options) options.style.display = el.checked ? '' : 'none';
+            updateAiProviderUI();
+        },
     },
 });
 
@@ -749,4 +675,3 @@ registerPanelActions({
 // payload. The MCP tab does too, from panel-mcp.js.
 onShown('ai-knowledgebase', () => loadKnowledgeBase());
 onShown('ai-summaries', () => loadSummaryJobs());
-onShown('ai-personas', () => renderPersonas());

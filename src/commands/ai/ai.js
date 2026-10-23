@@ -4,6 +4,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     resolveMcpServers,
     forGuild,
+    forMember,
     getMcpServers,
     effectiveMcpRoute,
     DEFAULT_CONFIRM_MODE,
@@ -28,6 +29,7 @@ const { toolLabel } = require('../../utils/toolLabel');
 const ScheduledTask = require('../../models/ScheduledTask');
 const { createTask } = require('../../services/scheduledTaskService');
 const { parseAtOption } = require('../../utils/timezones');
+const { parseCron, describeCron } = require('../../utils/cronSchedule');
 const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
@@ -36,7 +38,7 @@ const {
 const { runDeepTask, refuseTask } = require('../../services/ai/deepTask');
 const { missingKeyMessage } = require('../../services/ai/apiKeys');
 
-const MEMORY_CAP = 10;
+const { MAX_MEMORY_CAP, memoryCapFor } = require('../../utils/memoryLimits');
 
 // What a task request may say. Longer than a scheduled task's instruction —
 // somebody typing this is present and describing a job in one go — and far
@@ -72,7 +74,7 @@ module.exports = {
                     opt.setName('delete')
                         .setDescription('Delete a memory by its number (from the list)')
                         .setMinValue(1)
-                        .setMaxValue(MEMORY_CAP)
+                        .setMaxValue(MAX_MEMORY_CAP)
                 )
         )
         .addSubcommand(sub =>
@@ -161,6 +163,23 @@ module.exports = {
                                     { name: 'Weekly', value: 'weekly' },
                                     { name: 'Monthly', value: 'monthly' }
                                 ))
+                        .addStringOption(opt =>
+                            opt.setName('cron')
+                                .setDescription('A cron schedule instead of `every`, e.g. "0 9 * * 1-5" for weekdays at 9')
+                                .setMaxLength(100)
+                                .setRequired(false))
+                        .addStringOption(opt =>
+                            opt.setName('deliver')
+                                .setDescription('Post the result in a channel (default), or send it to you by DM')
+                                .setRequired(false)
+                                .addChoices(
+                                    { name: 'In a channel', value: 'channel' },
+                                    { name: 'To me by DM', value: 'dm' }
+                                ))
+                        .addBooleanOption(opt =>
+                            opt.setName('deep')
+                                .setDescription('Give each run deep task mode\'s room: more tool rounds, several minutes')
+                                .setRequired(false))
                         .addChannelOption(opt =>
                             opt.setName('channel')
                                 .setDescription('Where the result is posted. Defaults to this channel.')
@@ -265,16 +284,23 @@ module.exports = {
             });
         }
 
+        const settings = await getGuildSettings(interaction.guild.id).catch(() => null);
+        const cap = memoryCapFor(settings?.ai);
+
+        // A guild can raise the cap to fifty, and fifty spaced-out entries at
+        // the full preview length would pass an embed description's 4,096.
+        const dense = memories.length > 20;
+        const previewLength = dense ? 60 : 80;
         const lines = memories.map((m, i) => {
-            const preview = m.content.length > 80 ? m.content.slice(0, 80) + '…' : m.content;
+            const preview = m.content.length > previewLength ? m.content.slice(0, previewLength) + '…' : m.content;
             return `**${i + 1}.** ${preview}`;
         });
 
         const embed = new EmbedBuilder()
             .setTitle('📌 Your Pinned Memories')
             .setColor('#f1c40f')
-            .setDescription(lines.join('\n\n'))
-            .setFooter({ text: `${memories.length}/${MEMORY_CAP} slots used · Use /ai memories delete:<number> to remove one` });
+            .setDescription(lines.join(dense ? '\n' : '\n\n'))
+            .setFooter({ text: `${memories.length}/${cap} slots used · Use /ai memories delete:<number> to remove one` });
 
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
@@ -335,6 +361,19 @@ function shortTaskId(task) {
     return task._id.toString().slice(-6);
 }
 
+/**
+ * How often a task runs, wrapped for the sentence it goes in. A cron task is
+ * described in its own timezone, since that is what its hours are in.
+ */
+function taskCadence(task, before, after, once) {
+    if (task.cron) {
+        const { schedule } = parseCron(task.cron);
+        const label = schedule ? describeCron(schedule) : `cron \`${task.cron}\``;
+        return `${before}${label} (${task.timezone || 'Etc/UTC'})${after}`;
+    }
+    return task.repeat ? `${before}${task.repeat}${after}` : once;
+}
+
 async function handleSchedule(interaction) {
     const sub = interaction.options.getSubcommand();
     if (sub === 'add') return addScheduledTask(interaction);
@@ -347,13 +386,25 @@ async function addScheduledTask(interaction) {
     const at = interaction.options.getString('at');
     const inMinutes = interaction.options.getInteger('in_minutes');
     const every = interaction.options.getString('every');
-    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    const cron = interaction.options.getString('cron');
+    const deliverTo = interaction.options.getString('deliver') || 'channel';
+    const mode = interaction.options.getBoolean('deep') ? 'deep' : 'standard';
+    const channelOption = interaction.options.getChannel('channel');
+    const channel = channelOption || interaction.channel;
 
     if (at && inMinutes) {
         return interaction.reply({ content: 'Use either `at` or `in_minutes`, not both.', flags: MessageFlags.Ephemeral });
     }
-    if (!at && !inMinutes) {
-        return interaction.reply({ content: 'Say when it should first run — either `at` or `in_minutes`.', flags: MessageFlags.Ephemeral });
+    if (deliverTo === 'dm' && channelOption) {
+        return interaction.reply({ content: 'A DM task comes to you, not a channel — leave `channel` out.', flags: MessageFlags.Ephemeral });
+    }
+    if (every && cron) {
+        return interaction.reply({ content: 'Use either `every` or `cron`, not both.', flags: MessageFlags.Ephemeral });
+    }
+    // A cron schedule says when it runs on its own; `at` or `in_minutes` with
+    // one only moves the first run.
+    if (!at && !inMinutes && !cron) {
+        return interaction.reply({ content: 'Say when it should first run — either `at` or `in_minutes` — or give it a `cron` schedule.', flags: MessageFlags.Ephemeral });
     }
     if (!channel?.isTextBased?.()) {
         return interaction.reply({ content: 'Pick a channel I can post text in.', flags: MessageFlags.Ephemeral });
@@ -364,7 +415,7 @@ async function addScheduledTask(interaction) {
     const settings = await getGuildSettings(interaction.guild.id);
     const timezone = settings?.ai?.dailyDigest?.timezone || 'Etc/UTC';
 
-    let fireAt;
+    let fireAt = null;
     if (at) {
         fireAt = parseAtOption(at, timezone);
         if (!fireAt) {
@@ -376,11 +427,11 @@ async function addScheduledTask(interaction) {
         if (fireAt.getTime() <= Date.now()) {
             return interaction.reply({ content: 'That time has already passed — pick a future one.', flags: MessageFlags.Ephemeral });
         }
-    } else {
+    } else if (inMinutes) {
         fireAt = new Date(Date.now() + inMinutes * 60_000);
     }
 
-    if (fireAt.getTime() - Date.now() > MAX_TASK_DELAY_MINUTES * 60_000) {
+    if (fireAt && fireAt.getTime() - Date.now() > MAX_TASK_DELAY_MINUTES * 60_000) {
         return interaction.reply({ content: 'A task can be scheduled at most a year out.', flags: MessageFlags.Ephemeral });
     }
 
@@ -392,21 +443,33 @@ async function addScheduledTask(interaction) {
         prompt: instruction,
         fireAt,
         repeat: every || null,
-        timezone
+        cron,
+        timezone,
+        deliverTo,
+        mode
     });
     if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
 
     const stamp = Math.floor(task.fireAt.getTime() / 1000);
-    const cadence = every ? `, repeating **${every}**` : ' (once)';
+    const cadence = taskCadence(task, ', repeating **', '**', ' (once)');
+    const where = (deliverTo === 'dm' ? 'to your DMs' : `in ${channel}`) + (mode === 'deep' ? ' as a **deep** task' : '');
+    const dmNote = deliverTo === 'dm'
+        ? '\n-# Keep your DMs open to this bot, and keep Manage Server: the task stops if either goes.'
+        : '';
     return interaction.reply({
-        content: `✅ Scheduled \`${shortTaskId(task)}\` in ${channel} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
-            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.',
+        content: `✅ Scheduled \`${shortTaskId(task)}\` ${where} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
+            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.'
+            + dmNote,
         allowedMentions: { parse: [] }
     });
 }
 
 async function listScheduledTasks(interaction) {
-    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
+    // Active tasks first. A one-shot is switched off when it runs and never
+    // pruned, so by `fireAt` alone a server's old one-shots fill the window and
+    // push a live recurring task out of the list — and out of reach of
+    // `/ai schedule remove`, which takes the id this listing shows.
+    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ enabled: -1, fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
     if (!tasks.length) {
         return interaction.reply({
             content: 'No scheduled AI tasks on this server yet — add one with `/ai schedule add`.',
@@ -416,11 +479,12 @@ async function listScheduledTasks(interaction) {
 
     const lines = tasks.map(task => {
         const stamp = Math.floor(task.fireAt.getTime() / 1000);
-        const cadence = task.repeat ? ` · repeats ${task.repeat}` : ' · once';
+        const cadence = taskCadence(task, ' · repeats ', '', ' · once') + (task.mode === 'deep' ? ' · deep' : '');
         // A disabled task is one somebody switched off or one the runner gave
         // up on, and the reason it gave up is the useful half.
         const state = task.enabled ? '' : ` · **off**${task.lastError ? ` (${toolLabel(task.lastError, 60)})` : ''}`;
-        return `\`${shortTaskId(task)}\` <#${task.channelId}> — ${toolLabel(task.prompt || task.kind, 80)}\n`
+        const where = task.deliverTo === 'dm' ? `DM to <@${task.createdBy}>` : `<#${task.channelId}>`;
+        return `\`${shortTaskId(task)}\` ${where} — ${toolLabel(task.prompt || task.kind, 80)}\n`
             + `-# next <t:${stamp}:R>${cadence}${state}`;
     });
 
@@ -458,6 +522,16 @@ async function removeScheduledTask(interaction) {
     return interaction.reply({ content: `🗑️ Removed scheduled task \`${wanted}\`.`, flags: MessageFlags.Ephemeral });
 }
 
+/**
+ * The guild's connections as this member may use them: an OAuth connection,
+ * or one marked managers-only, is left out for anyone without Manage Server
+ * (see forMember). For the subcommands members may run.
+ */
+function memberServers(interaction, servers) {
+    const canManage = Boolean(interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild));
+    return forMember(forGuild(interaction.guild.id, servers), canManage);
+}
+
 /** The guild's stored connections, merged with the operator's config file. */
 async function guildMcpServers(guildId) {
     const settings = await getGuildSettings(guildId);
@@ -478,7 +552,7 @@ async function respondWithPrompts(interaction, typed) {
     const settings = await getGuildSettings(interaction.guild.id);
 
     const listings = await Promise.race([
-        listGuildPrompts(forGuild(interaction.guild.id, settings?.ai?.mcpServers)),
+        listGuildPrompts(memberServers(interaction, settings?.ai?.mcpServers)),
         new Promise(resolve => setTimeout(() => resolve([]), AUTOCOMPLETE_BUDGET_MS).unref?.())
     ]).catch(() => []);
 
@@ -504,7 +578,7 @@ async function handleMcp(interaction) {
 
     if (sub === 'prompts') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
+        const listings = await listGuildPrompts(memberServers(interaction, ai.mcpServers));
         return interaction.editReply({ embeds: [promptsEmbed(listings)] });
     }
 
@@ -584,7 +658,8 @@ async function runMcpPrompt(interaction, ai) {
     await interaction.deferReply();
 
     const requested = interaction.options.getString('name');
-    const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
+    const servers = memberServers(interaction, ai.mcpServers);
+    const listings = await listGuildPrompts(servers);
     const match = findPrompt(listings, requested);
     if (match.error) return editText(interaction, match.error);
 
@@ -609,8 +684,10 @@ async function runMcpPrompt(interaction, ai) {
     if (config.provider !== 'ollama' && !config.apiKey) {
         return editText(interaction, missingKeyMessage(providers.get(config.provider)?.label || config.provider, config.keyError));
     }
+    // And the turn the template runs as reaches only those connections too.
+    config.mcpServers = servers;
 
-    const rendered = await renderPrompt(forGuild(interaction.guild.id, ai.mcpServers), match.server, match.prompt.name, parsed.values);
+    const rendered = await renderPrompt(servers, match.server, match.prompt.name, parsed.values);
     if (rendered.error) return editText(interaction, `❌ ${rendered.error}`);
 
     const systemPrompt = (ai.systemPrompt || 'You are a helpful Discord bot assistant.')

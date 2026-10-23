@@ -42,6 +42,26 @@ class BoundedRateLimiter {
     }
 
     /**
+     * `check`, handing back what it recorded so the caller can take it back
+     * with `release`: a slot held while slow work runs, refunded if that work
+     * turns out never to have happened. Null when there was no slot.
+     */
+    reserve(key, windowMs, limit) {
+        if (!this.check(key, windowMs, limit)) return null;
+        const arr = this._map.get(key);
+        return { key, at: arr[arr.length - 1] };
+    }
+
+    /** Give back one slot `reserve` took — that one only, and only once. */
+    release(token) {
+        if (!token || token.released) return;
+        token.released = true;
+        const arr = this._map.get(token.key);
+        const index = arr ? arr.lastIndexOf(token.at) : -1;
+        if (index !== -1) arr.splice(index, 1);
+    }
+
+    /**
      * Reports whether `key` would be allowed right now, without recording it.
      *
      * This exists so a caller can refuse early — before doing the database and

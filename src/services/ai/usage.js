@@ -22,6 +22,22 @@ function estimateCost(provider, model, inputTokens, outputTokens, cachedInputTok
     return (uncached * row.in + cached * cachedRate + outputTokens * row.out) / 1_000_000;
 }
 
+/**
+ * What one ledger row cost: from the pricing table, or else what the service
+ * itself reported charging (`reportedCost`), when every call in the row
+ * reported it. OpenRouter and Higgsfield images are priced that way: neither
+ * has a table here, and both say what a call cost. A row where some calls said
+ * and some did not is null, like any other unpriced row — a partial sum would
+ * read as the whole one, which a spend limit must not do.
+ */
+function rowCost(row) {
+    const estimated = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0, row.cachedInputTokens || 0);
+    if (estimated != null) return estimated;
+    const reported = row.reportedCostRequests || 0;
+    if (reported > 0 && reported >= (row.requestCount || 0)) return row.reportedCost || 0;
+    return null;
+}
+
 function utcDayString(date = new Date()) {
     return date.toISOString().slice(0, 10);
 }
@@ -85,9 +101,9 @@ async function loadMonthlyUsage(guildId, month = utcMonthString()) {
     let costKnown = true;
     for (const row of rows) {
         tokens += (row.inputTokens || 0) + (row.outputTokens || 0);
-        const rowCost = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0, row.cachedInputTokens || 0);
-        if (rowCost == null) costKnown = false;
-        else cost += rowCost;
+        const spent = rowCost(row);
+        if (spent == null) costKnown = false;
+        else cost += spent;
     }
     return { month, tokens, cost, costKnown };
 }
@@ -196,22 +212,30 @@ async function recordUsage(guildId, provider, model, usage) {
     if (!guildId || !usage) return;
     const inputTokens = Math.max(0, Math.floor(usage.inputTokens || 0));
     const outputTokens = Math.max(0, Math.floor(usage.outputTokens || 0));
-    if (inputTokens === 0 && outputTokens === 0) return;
+    // What the service said the call cost, in USD, for one priced per call
+    // rather than per token (see rowCost). `null` is a call that should have
+    // said and did not: still recorded, so the row reads as unpriced.
+    const reportsCost = Object.prototype.hasOwnProperty.call(usage, 'cost');
+    const reportedCost = reportsCost && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost : null;
+    if (inputTokens === 0 && outputTokens === 0 && !reportsCost) return;
     // The share of the input that came from the provider's prompt cache
     // (#1046). Never more than the input it is a part of — a provider that
     // reported it inconsistently must not make the hit rate exceed 100%.
     const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(usage.cachedInputTokens || 0)));
     const day = utcDayString();
     const filter = { guildId, day, provider, model: model || 'unknown' };
-    const update = {
-        $inc: { inputTokens, outputTokens, cachedInputTokens, requestCount: 1 },
-        $set: { updatedAt: new Date() }
-    };
+    const inc = { inputTokens, outputTokens, cachedInputTokens, requestCount: 1 };
+    if (reportedCost != null) {
+        inc.reportedCost = reportedCost;
+        inc.reportedCostRequests = 1;
+    }
+    const update = { $inc: inc, $set: { updatedAt: new Date() } };
     // Charged against the cached monthly total first, so the ceiling sees this
     // call even though the write below is what the next refresh will read. A
     // failed write leaves the cache a little pessimistic until that refresh,
     // which is the right way round for a spend limit.
-    bumpMonthlyUsage(guildId, inputTokens + outputTokens, estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens));
+    bumpMonthlyUsage(guildId, inputTokens + outputTokens,
+        estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens) ?? reportedCost);
 
     try {
         await AIUsage.updateOne(filter, update, { upsert: true });
@@ -262,7 +286,7 @@ async function getUsageStats(guildId, days = 14) {
     let costKnown = true;
 
     for (const row of rows) {
-        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
+        const cost = rowCost(row);
         if (cost == null) costKnown = false;
         const totalTokens = row.inputTokens + row.outputTokens;
         const cachedInput = row.cachedInputTokens || 0;
@@ -307,7 +331,7 @@ async function getUsageStats(guildId, days = 14) {
         m.outputTokens += row.outputTokens;
         m.cachedInputTokens += row.cachedInputTokens || 0;
         m.requestCount += row.requestCount;
-        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
+        const c = rowCost(row);
         if (c == null) m.costKnown = false;
         else m.cost += c;
     }
@@ -330,6 +354,7 @@ function round4(n) { return Math.round(n * 10000) / 10000; }
 
 module.exports = {
     estimateCost,
+    rowCost,
     recordUsage,
     getUsageStats,
     loadMonthlyUsage,

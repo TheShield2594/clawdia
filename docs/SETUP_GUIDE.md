@@ -162,6 +162,31 @@ Set **Model context window** in the dashboard too — see
 [FEATURES.md](FEATURES.md#configuration-options) for why a self-hosted model is
 the case where the bot cannot work it out for itself.
 
+### Web search (SearXNG)
+
+The AI's `web_search` tool queries a [SearXNG](https://docs.searxng.org/)
+instance you run. No API key, and nothing is sent anywhere but your own instance.
+
+1. Allow JSON output in SearXNG's `settings.yml` — without it every search is
+   refused with a 403:
+
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+2. Set `SEARXNG_URL` to the instance, e.g. `http://searxng:8080`. Like
+   `OLLAMA_BASE_URL` it is your own endpoint, so a private or Docker address is
+   fine.
+3. Turn on **Enable web access** in the dashboard, under **AI → Abilities**, in each
+   server that should have it. That switch also gives the AI `read_webpage`,
+   which needs no SearXNG at all.
+
+The tool is offered in chat replies, `/ai task` and scheduled tasks. Each search
+is one tool call against the server's usual per-user and per-guild tool budgets.
+
 ### Choosing between them
 
 [AI_COMPARISON.md](AI_COMPARISON.md) is the side-by-side: default model,
@@ -256,8 +281,11 @@ the server answers that POST with a 404 or a 405, which is what a server built
 against the 2024-11-05 revision does. Nothing has to be configured either way;
 paste the endpoint the service publishes.
 
-Local **stdio** servers are still out of reach: they are a subprocess on the
-machine running the server, not an address, and the bot connects over HTTP.
+Local **stdio** servers — a program speaking MCP over stdin/stdout rather than
+an address — cannot be added here, because a dashboard field that runs a
+command would let any server admin run programs on the host. The operator can
+add one in the config file with `command` (see *Servers that run as a command*
+below).
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -340,14 +368,91 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. Local stdio servers cannot be reached this way. |
+| `url` | Yes, or `command` | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. For a server that runs as a local program, use `command` instead. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
+| `managers_only` | No | Set `true` to offer this connection only to members with Manage Server: anyone else's AI requests do not see it at all. Use it for a token that is somebody's own account — a mailbox, a calendar. A connection signed in with OAuth is always managers-only. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+| `command` / `args` / `env` / `cwd` | Instead of `url` | Run the server as a local process and speak MCP over its stdin/stdout. Config file only; see below. |
+| `allow_private` | No | Set `true` for a server on your own network — a LAN address, a container on the compose network, or plain `http://`. Config file only; see below. |
+| `confirm_tools` / `unattended_tools` | No | The same two lists as a dashboard connection's **Always ask before these tools** and **Run without asking in scheduled tasks**. |
+
+**Servers on your own network.** Every MCP URL is normally held to a public
+`https://` address, because a dashboard field that could point the bot at a
+private one would let any server admin reach whatever the bot's container can —
+the database, the metadata service, the rest of your LAN. An entry in the config
+file is yours rather than a server admin's, so `"allow_private": true` lifts
+both checks for that entry alone: it may use a private address, and plain
+`http://`. A self-hosted notes or git MCP server is the case it is for:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "url": "http://obsidian-mcp:3000/mcp",
+      "authorization_token": "${VAULT_MCP_TOKEN}",
+      "allow_private": true,
+      "guilds": ["<your server id>"]
+    }
+  ]
+}
+```
+
+What it does not change: a dashboard connection can never set it, and one with
+the same name replaces the file's entry, flag included. The URL still cannot
+carry a username or password. Over `http://` the token travels unencrypted, so
+keep that to a network you trust. Set `guilds` on it, since every server the
+entry reaches can have the bot read and write through it. These servers are
+always reached through the bot's own MCP client, even on Claude, because
+Anthropic's connector dials from Anthropic's side and cannot see your network.
+
+**Servers that run as a command.** Most MCP servers ship as a program that
+speaks MCP over stdin and stdout, not as a web endpoint. Give the entry a
+`command` instead of a `url` and the bot starts that program itself when the
+AI first needs it, stops it after ten idle minutes, and restarts it if it
+crashes:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "command": "node",
+      "args": ["/mcp/obsidian-mcp/dist/index.js", "/vault"],
+      "env": { "VAULT_API_KEY": "${VAULT_API_KEY}" },
+      "guilds": ["<your server id>"],
+      "unattended_tools": ["create_note"]
+    }
+  ]
+}
+```
+
+- **Config file only.** A command in a dashboard field would let any server
+  admin run programs on your host, so a dashboard connection with one is
+  ignored.
+- **It gets almost none of the bot's environment.** The process sees `PATH`,
+  `HOME`, the locale and timezone, and what you list in `env` — never the
+  Discord token, the database URI or the AI keys. `env` values and `args` can be
+  `${VAR}` references, read from the bot's environment when the file loads.
+- **It runs inside the bot's container, as the bot's user.** The published image
+  has Node but not `npm`, `npx`, Python or `uvx`, so install the server into a
+  folder you mount (for example `npm install --prefix ./mcp obsidian-mcp` on the
+  host, mounted at `/mcp`) and point `command` at `node`. Mount anything it works
+  on, such as the vault, as well. For a Python server, or anything heavy, run it
+  as its own container and connect to it by URL with `allow_private` instead.
+- **Keep it in sync yourself.** A notes server edits files on disk. If the vault
+  lives in git, a cron job that pulls and pushes it is what gets those edits
+  anywhere else.
+- **It is shared** by every Discord server its `guilds` list names: one process,
+  one set of tools. Set `guilds`.
+- **A server that cannot start** — a wrong path, a missing package — is reported
+  in the logs and left alone for thirty seconds rather than restarted by every
+  message.
 
 **The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
 references, which the bot reads and never writes — and a refresh token rotates,
@@ -393,6 +498,95 @@ Dashboard tokens are encrypted at rest when `SECRET_ENCRYPTION_KEY` is set, the
 same as provider keys. Migration 027 encrypts the ones already stored, and
 `npm run secrets:encrypt` does the same on demand.
 
+#### A browser for the AI
+
+`read_webpage` reads static HTML, so a page that renders with JavaScript comes
+back empty and one behind a login is out of reach. Playwright publishes an MCP
+server that drives a real headless Chromium: navigate, read the rendered page,
+click, type, take a screenshot. It runs as an optional sidecar, since the bot's
+image has no browser and no npm.
+
+1. Start it. `docker-compose.yml` defines it under the `browser` profile:
+
+   ```bash
+   docker compose --profile browser up -d
+   ```
+
+   It joins `browser-network`, which only it and the bot are on.
+
+2. Add an entry to `config/mcp-servers.json` and restart the bot:
+
+   ```json
+   {
+     "servers": [
+       {
+         "name": "browser",
+         "url": "http://playwright:8931/mcp",
+         "allow_private": true,
+         "guilds": ["<your server id>"],
+         "allowed_tools": [
+           "browser_navigate", "browser_navigate_back", "browser_snapshot",
+           "browser_find", "browser_take_screenshot", "browser_tabs", "browser_close",
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ],
+         "confirm_tools": [
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ]
+       }
+     ]
+   }
+   ```
+
+   The log should then show `[MCP] 1 server(s) from …: browser`, and asking the
+   AI to read a JavaScript-heavy page should show `browser_navigate` and
+   `browser_snapshot` in the reply's tool line.
+
+What the entry does:
+
+- **`allow_private`** is required. The sidecar is a container on your own
+  network, reached over plain `http://`, which a URL is otherwise never allowed
+  to be.
+- **`guilds`** limits it to one Discord server. The bot keeps one connection
+  per server URL, so every guild the entry reaches shares the same browser
+  session, with the same open tabs and cookies.
+- **`allowed_tools`** is an allowlist, so a tool a newer image adds stays off
+  until you add it. Left out on purpose: `browser_evaluate` and
+  `browser_run_code_unsafe` (they run arbitrary script in the page),
+  `browser_file_upload` (it reads files from the sidecar), and the network,
+  console, drag and emulation tools, which a reading assistant has no use for.
+- **`confirm_tools`** puts everything beyond reading behind the **Run it**
+  button. Navigating, reading and screenshots run freely; a click, a keystroke
+  or a form fill waits for a person. A scheduled task has nobody to ask, so it
+  can only read. Don't list these under `unattended_tools`.
+- The model reads a page with `browser_snapshot`, which returns the rendered
+  text. `browser_navigate` on its own reports only where it landed.
+
+**Security.**
+
+- **A logged-in browser is a credential.** The service runs with `--isolated`,
+  so its profile lives in memory and every login is gone when the session or
+  the container ends. If you do want it signed in somewhere, save a Playwright
+  storage state file for an account made for the purpose, mount it read-only,
+  and add `--storage-state /state/state.json` to the service's `command`. Then
+  treat the entry like a token for that account: one guild, everything past
+  navigation behind approval, and no `unattended_tools`.
+- **The browser goes wherever a page tells it.** Page text is untrusted input,
+  and the model reads it, so a page can steer the model to another URL. That is
+  why the sidecar is kept off `db-network` (it can never reach MongoDB) and off
+  `clawdia-network`. It can still reach the bot on `browser-network` and
+  anything your host routes to, such as your LAN or a cloud metadata address,
+  and Playwright's `--blocked-origins` is documented as not being a security
+  boundary. On a host with private services, block the network's subnet at the
+  firewall: `docker network ls` lists it as `<project>_browser-network`,
+  `docker network inspect` on that name gives its subnet, and `DOCKER-USER`
+  rules dropping traffic from it to private ranges close the gap.
+- **The tools are third-party.** Everything the browser reads is sent to your AI
+  provider as a tool result, as for any other MCP server.
+
 #### Checking it works
 
 ```text
@@ -427,11 +621,17 @@ malformed config disables the connector, it never stops the bot from starting.
   straight away. `destructive` and `writes` both read the annotations a server
   publishes about its own tools; they differ over a tool that publishes none,
   which `destructive` lets through and `writes` asks about. `always` asks about
-  every call, reads included. By default a prompt can be answered by whoever
-  asked or by anyone with Manage Server; set **Who can click Run it** to
-  *Only members who can manage this server* when a connection holds credentials
-  ordinary members should not use on their own say-so. The person who asked can
-  still cancel. A prompt expires unanswered after a minute, and the tool then
+  every call, reads included. By default a prompt can be answered only by
+  someone with Manage Server; set **Who can click Run it** to *The member who
+  asked* to let members approve their own calls, which is only a check that the
+  model was not talked into something. The person who asked can still cancel.
+- **Who can use a connection.** A connection signed in with OAuth is
+  somebody's own account, so only members with Manage Server can use it: for
+  anyone else the AI does not see it, in chat, `/ai task` or `/ai mcp prompt`.
+  Any other connection is open to every member who can reach the AI, unless its
+  **Only members who can manage this server** switch is on (or, for a
+  config-file entry, `managers_only`). Scheduled tasks are set up by managers
+  and reach every connection. A prompt expires unanswered after a minute, and the tool then
   does not run.
 - **Questions from a server** are the same idea in reverse. A tool that gets
   halfway and needs one more fact — which environment, which of your three
@@ -501,8 +701,9 @@ malformed config disables the connector, it never stops the bot from starting.
   one a call still runs — the model may want the side effect — but what comes
   back says the output did not fit rather than carrying it. Past the clock no
   further call is dialled at all, and no approval prompt is put in front of
-  anyone for a call that will not happen either way. Both are refusals worded so
-  the model can answer around them rather than leaving a reply open.
+  anyone for a call that will not happen either way; the model is asked once
+  more with no tools, so it answers from what it has. Both are refusals worded
+  so the model can answer around them rather than leaving a reply open.
 - A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
   asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public

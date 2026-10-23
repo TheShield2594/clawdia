@@ -7,10 +7,12 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The catalogue is 311 icons on `gpt_image_2_5`**, look **B3** (see §0),
+**The catalogue is 484 icons on `gpt_image_2_5`**, look **B3** (see §0),
 anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons,
 the 144 catch/kill/mine results (issue #1081), the 14 pet portraits (issue
-#1082), and 10 explore regions + 25 explore relics. Every job id is in
+#1082), 10 explore regions + 25 explore relics, 72 achievement badges, the 10 fishing
+materials (issue #1169), the 22 mining materials (issue #1170), the 58 hunting
+materials (issue #1171) and the 11 exploration materials (issue #1172). Every job id is in
 `icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
@@ -171,6 +173,7 @@ activity as a prefix; the upload route rejects anything else.
 | Hunted animals | `animal:<id>` | `animal:grizzly_bear` |
 | Mined ores | `ore:<id>` | `ore:diamond` |
 | Pets | `pet:<petId>` | `pet:crystal_fox` |
+| Crafting materials | `<activity>:<id>` | `fish:pearl` |
 
 Three registries in `src/data/activityItems.js` are the authority: the 83
 shop-browse gear ids (`ACTIVITY_ITEM_IDS`), the 144 catch/kill/mine result ids
@@ -343,6 +346,47 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-10-22** — **Exploration materials: 11 of 11** (issue #1172). Keyed
+  `explore:<id>` through the shared `MATERIAL_ITEMS` registry, beside the region
+  and relic art (no id collides); rarity is the material's `tier`. They are a
+  surveyor's field kit in the parchment, brass and ink of the region and relic
+  art. The seal has no ribbon and the inkwell no cork, so neither reads as the
+  `the_final_decree` relic or a fishing/mining vial. Same settings as the rest,
+  in batches of 4, 4 and 3 with no 429s. `wayfarers_seal` was regenerated
+  after review (a wax drip ran past the rim, now a scalloped edge kept inside
+  it). Job ids + urls in `icons.map.json`
+  (now 484 items), and the PNGs are baked into `src/assets/item-icons/`.
+- **2026-10-22** — **Hunting materials: 58 of 58** (issue #1171). Keyed
+  `hunt:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
+  material's `tier`, which for the 32 zone materials is the tier of the animal
+  that drops them. Each one is a part of that animal, in its colours. Like kinds
+  share one silhouette (§4): the nine flat pelts, seven of the feathers, the six
+  fangs, four claws, three antlers, two horns, two tusks and the two lucky feet.
+  Same settings as the rest. The first two batches of 6 had 4 submissions come
+  back 429, which were resubmitted; batches of 4 or fewer went through clean. Three were regenerated
+  after review: `bear_claw` (black on black, lost on the dark tile, now
+  charcoal with a slate edge), `lion_tooth` (its cord ran past the rim over a
+  grey haze, now a leather-wrapped root) and `tusk_shard` (a soft halo outside
+  the rim). Job ids + urls in `icons.map.json` (now 473 items), and the PNGs
+  are baked into `src/assets/item-icons/`.
+- **2026-10-21** — **Mining materials: 22 of 22** (issue #1170). Keyed
+  `mine:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
+  material's `tier`. Each one is drawn as a piece of the ore it drops from, in
+  that ore icon's colours; the four dusts share one heap silhouette and the four
+  raw gems one rough-stone silhouette (§4). Same settings as the rest. 2 of 22
+  submissions came back 429 and were resubmitted; `crystal_sliver` came back
+  with an opaque grey square behind it and was regenerated. Job ids + urls in
+  `icons.map.json` (now 415 items), and the PNGs are baked into
+  `src/assets/item-icons/`.
+- **2026-10-06** — **Fishing materials: 10 of 10** (issue #1169, first of the
+  material batches in #1168). Materials are keyed `<activity>:<id>` — the key the
+  inventory cards already ask for — and registered bundle-only in
+  `src/data/activityItems.js` (`MATERIAL_ITEMS`, every material from
+  `materialRarity.js`, kept out of `isUploadableItemId`). Rarity is the
+  material's `tier`. The three scales share one teardrop silhouette (§4). Same
+  settings as the rest, 1.5 credits each; 3 of 13 submissions came back 429 and
+  were resubmitted. Job ids + urls in `icons.map.json` (now 393 items), and the
+  PNGs are baked into `src/assets/item-icons/`.
 - **2026-09-24** — **Achievement badges: 72 of 72.** Generated the remaining 37
   (issue #1108): all 13 Common (silver-grey rim) and all 24 Uncommon
   (emerald-green rim), same settings as the rest (`gpt_image_2_5`,

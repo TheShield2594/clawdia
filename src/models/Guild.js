@@ -1,5 +1,7 @@
 const { Schema, model } = require('mongoose');
 const { encryptSecret, guildSecretBinding } = require('../config/secretBox');
+const { VOICE_REPLY_MODES } = require('../config/aiVoice');
+const { IMAGE_SERVICES } = require('../config/aiImages');
 
 /**
  * The guild a setter is writing for. `this` is the Guild document on a save,
@@ -46,19 +48,6 @@ function distinctMcpServerNames(servers) {
         if (!server || !server.name) continue;
         if (seen.has(server.name)) return false;
         seen.add(server.name);
-    }
-
-    return true;
-}
-
-function distinctChannelPersonaIds(personas) {
-    if (!Array.isArray(personas)) return true;
-
-    const seen = new Set();
-    for (const persona of personas) {
-        if (!persona || !persona.channelId) continue;
-        if (seen.has(persona.channelId)) return false;
-        seen.add(persona.channelId);
     }
 
     return true;
@@ -489,6 +478,9 @@ const guildSchema = new Schema({
         geminiKey: { type: String, default: null, set: sealedToGuild('ai.geminiKey') },
         anthropicKey: { type: String, default: null, set: sealedToGuild('ai.anthropicKey') },
         openrouterKey: { type: String, default: null, set: sealedToGuild('ai.openrouterKey') },
+        // Higgsfield's key ID and secret as `ID:SECRET`, for images only
+        // (services/ai/images.js). Sealed like the provider keys above.
+        higgsfieldKey: { type: String, default: null, set: sealedToGuild('ai.higgsfieldKey') },
         ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
         systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },
@@ -549,18 +541,6 @@ const guildSchema = new Schema({
         // nobody typed. A server that wants its war announcements narrated says
         // so; the announcements are unchanged for everyone else.
         eventCommentary: { type: Boolean, default: false },
-        // Per-channel personas: each entry overrides systemPrompt for that channel
-        channelPersonas: {
-            type: [{
-                channelId:    { type: String, required: true },
-                personaName:  { type: String, default: 'Assistant' },
-                systemPrompt: { type: String, required: true }
-            }],
-            validate: {
-                validator: distinctChannelPersonaIds,
-                message: 'channelPersonas contains duplicate channelId values.'
-            }
-        },
         // Remote MCP servers this guild has connected in the dashboard. Merged
         // with the operator-wide config file at request time; a name defined in
         // both places resolves to the guild's entry. Whichever provider the
@@ -587,6 +567,13 @@ const guildSchema = new Schema({
                 // nobody may call; this is for the ones that are fine with a
                 // moderator watching and not otherwise.
                 confirmTools:       [{ type: String }],
+                // Tools a scheduled task may run with nobody there to approve
+                // them. A scheduled run has no channel to post buttons in, so a
+                // tool that needs approval is otherwise refused there — which
+                // is right by default and wrong for "every morning, add my
+                // classes to the calendar". Only read by scheduled runs; a
+                // conversation still asks.
+                unattendedTools:    [{ type: String }],
                 // Whether this server's resources (resources/list, then
                 // resources/read) are searched for context when somebody talks
                 // to the AI, the way the knowledge base is. Off by default and
@@ -594,6 +581,12 @@ const guildSchema = new Schema({
                 // resource is read before the model has said anything and lands
                 // in the system prompt of every message.
                 resources:          { type: Boolean, default: false },
+                // Offered only to members with Manage Server: for anyone else
+                // the AI does not see this connection at all (see forMember in
+                // src/config/mcpServers.js). For a token that is somebody's
+                // own account. An OAuth connection is managers-only whatever
+                // this says.
+                managersOnly:       { type: Boolean, default: false },
                 // An OAuth grant, for the servers that accept nothing else
                 // (#796). Present instead of `authorizationToken`, not
                 // alongside it: a connection authorizes one way or the other,
@@ -673,12 +666,13 @@ const guildSchema = new Schema({
             default: 'auto'
         },
         // Who may click "Run it" on a tool call waiting for approval (#1143):
-        // the member who asked (or a moderator), or moderators only. See
-        // MCP_APPROVERS in src/config/mcpServers.js.
+        // the member who asked (or a moderator), or moderators only — the
+        // default since the AI-layer audit. See MCP_APPROVERS in
+        // src/config/mcpServers.js.
         mcpApprover: {
             type: String,
             enum: ['requester', 'managers'],
-            default: 'requester'
+            default: 'managers'
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },
@@ -689,6 +683,68 @@ const guildSchema = new Schema({
         // person who asked has walked away. Guarded further by an allowance of
         // its own in services/ai/rateLimit.js.
         taskModeEnabled: { type: Boolean, default: false },
+        // Long-term memory about each member (#833), and how freely the model
+        // may write to it. `autoSave` off is the original posture: save_memory
+        // posts approval buttons and saves nothing until somebody clicks. On,
+        // the model saves and forgets on its own — which suits a server run by
+        // one person for themselves, and nobody else. `cap` is per member; every
+        // memory rides in the prompt of every reply, so it is a token budget as
+        // much as a storage one. See utils/memoryLimits.js.
+        memory: {
+            autoSave: { type: Boolean, default: false },
+            cap: { type: Number, default: 10, min: 1, max: 50 }
+        },
+        // Whether the model may write what it worked out to the knowledge base
+        // as a how-to note, so a later conversation retrieves it (the `learn`
+        // tool in services/ai/agentTools.js). Off by default: a note is
+        // guild-wide and read back into everybody's prompts, so it is offered
+        // only to members with Manage Server.
+        learningEnabled: { type: Boolean, default: false },
+        // A web_search tool over the operator's SearXNG instance (SEARXNG_URL).
+        // Per guild as well as per operator, because each search is another
+        // tool round on this guild's budget.
+        webSearchEnabled: { type: Boolean, default: false },
+        // Keep a searchable log of every AI turn (models/ConversationLog.js)
+        // and give the model a search_conversations tool over the asker's own
+        // turns. Off by default: it is a year of members' conversations stored,
+        // which a community server should decide on rather than inherit.
+        conversationSearch: { type: Boolean, default: false },
+        // Transcribe voice messages so the model can answer them
+        // (services/ai/transcription.js), with the guild's OpenAI or Gemini key.
+        // Off by default: each clip is a second paid call, to a service the
+        // guild may not otherwise use.
+        voiceTranscription: { type: Boolean, default: false },
+        // Read the reply aloud as well (services/ai/speech.js; modes in
+        // config/aiVoice.js). The audio is in addition to the text, never
+        // instead of it. Off by default: each spoken reply is another paid call.
+        voiceReplies: { type: String, enum: VOICE_REPLY_MODES, default: 'off' },
+        // A generate_image tool (services/ai/images.js), with the guild's
+        // OpenAI or Gemini key. Off by default: one image costs about what a
+        // few dozen chat replies do.
+        imageGeneration: { type: Boolean, default: false },
+        // Which service draws first and with which model (config/aiImages.js).
+        // Set on the dashboard; an empty model is the operator's default for
+        // that service.
+        imageService: { type: String, enum: IMAGE_SERVICES, default: 'auto' },
+        imageModels: {
+            openai: { type: String, default: null, maxlength: 100 },
+            gemini: { type: String, default: null, maxlength: 100 },
+            openrouter: { type: String, default: null, maxlength: 100 },
+            higgsfield: { type: String, default: null, maxlength: 100 }
+        },
+        // Providers to answer with when the primary cannot (services/ai/index.js):
+        // down, overloaded, rate-limited, or refusing the key. Tried in order,
+        // each with this guild's own key for it; a null model is that
+        // provider's default. At most two.
+        fallbacks: {
+            type: [{
+                _id: false,
+                provider: { type: String, enum: ['openai', 'gemini', 'anthropic', 'ollama', 'openrouter'], required: true },
+                model: { type: String, default: null }
+            }],
+            default: [],
+            validate: { validator: list => list.length <= 2, message: 'At most two backup providers.' }
+        },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },
