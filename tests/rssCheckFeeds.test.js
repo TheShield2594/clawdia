@@ -74,9 +74,15 @@ ${body}
 
 function makeClient() {
     const send = jest.fn(async () => ({}));
-    const channel = { send, isTextBased: () => true };
+    // One channel per id, in the guild the fixtures pair it with (c1 ↔ g1):
+    // delivery refuses a channel that belongs to another guild (#1140).
+    const channels = new Map();
+    const channelFor = id => {
+        if (!channels.has(id)) channels.set(id, { send, isTextBased: () => true, guildId: `g${String(id).slice(1)}` });
+        return channels.get(id);
+    };
     return {
-        channels: { fetch: jest.fn(async () => channel), cache: new Map() },
+        channels: { fetch: jest.fn(async id => channelFor(id)), cache: new Map() },
         send,
     };
 }
@@ -100,6 +106,19 @@ beforeEach(() => {
 });
 
 afterEach(() => jest.restoreAllMocks());
+
+test("a subscription whose channel is in another guild is not posted to (#1140)", async () => {
+    const url = 'https://example.com/rss';
+    mockFeedBodies.set(url, rssXml());
+    // c2 belongs to g2; g1 saved it before the dashboard checked ownership.
+    mockGuilds = [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c2', lastPublished: null }] }];
+    const client = makeClient();
+
+    await checkRssFeeds(client);
+
+    expect(client.send).not.toHaveBeenCalled();
+    expect(Guild.updateOne).not.toHaveBeenCalled();
+});
 
 test('a URL shared by many guilds is fetched once and delivered to each', async () => {
     const url = 'https://example.com/rss';

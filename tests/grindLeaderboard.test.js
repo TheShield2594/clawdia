@@ -168,6 +168,32 @@ describe('Hall of Champions', () => {
         expect(description.indexOf('2026-W37')).toBeLessThan(description.indexOf('2026-W36'));
     });
 
+    it('hands the picture card each week\'s champions, by track, with their avatars', async () => {
+        mockFindChain(WeeklyChampion, [
+            { week: '2026-W37', category: 'hunt', userId: 'h', username: 'H', total: 4000, runs: 9 },
+            { week: '2026-W37', category: 'mine', userId: 'gone', username: 'Left', total: 3000, runs: 5 },
+            { week: '2026-W36', category: 'hunt', userId: 'h', username: 'H', total: 12, runs: 3 },
+        ]);
+        const interaction = makeInteraction();
+        interaction.client.users.fetch = jest.fn(async id => {
+            if (id === 'gone') throw new Error('Unknown User');
+            return { id, globalName: 'Hunter H', displayAvatarURL: () => `https://cdn/${id}.png` };
+        });
+
+        const { card } = await buildChampionsHall(interaction);
+
+        // One fetch per champion, not per crown.
+        expect(interaction.client.users.fetch).toHaveBeenCalledTimes(2);
+        expect(card.weeks.map(w => w.week)).toEqual(['2026-W37', '2026-W36']);
+        expect(card.weeks[0].champions.hunt).toMatchObject({
+            role: 'HUNTER', name: 'Hunter H', avatarUrl: 'https://cdn/h.png', total: 4000, unit: 'coins hunted', runs: 9,
+        });
+        // A champion who has left keeps the name stored with the win.
+        expect(card.weeks[0].champions.mine).toMatchObject({ role: 'MINER', name: 'Left', avatarUrl: null });
+        expect(Object.keys(card.weeks[1].champions)).toEqual(['hunt']);
+        expect(typeof card.draw).toBe('function');
+    });
+
     it('is ephemeral before any champion is crowned', async () => {
         mockFindChain(WeeklyChampion, []);
         const payload = await buildChampionsHall(makeInteraction());

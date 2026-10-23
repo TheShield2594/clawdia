@@ -8,6 +8,9 @@ const {
     LIMITS,
     INTENSITY_LEVELS,
     DEFAULT_INTENSITY_LEVEL,
+    SEAM_GRADES,
+    ROCK_STABILITY,
+    ROCK_READ,
     PRESTIGE_BONUSES,
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
@@ -62,6 +65,11 @@ function ensureMineData(user) {
     if (m.eventFinds           == null) m.eventFinds           = 0;
     if (m.bestPayout           == null) m.bestPayout           = 0;
     if (m.consecutiveFails     == null) m.consecutiveFails     = 0;
+    // Tallies for tuning the dig (#1192): which intensity rung each dig was
+    // made at, and how each cave-in ended. Read off the mining GrindProfiles;
+    // nothing in the game reads them.
+    if (!m.intensityPicks || typeof m.intensityPicks !== 'object') m.intensityPicks = {};
+    if (!m.caveInOutcomes || typeof m.caveInOutcomes !== 'object') m.caveInOutcomes = {};
 
     if (!m.unlockedDepths.includes('surface_quarry')) {
         m.unlockedDepths.push('surface_quarry');
@@ -269,11 +277,21 @@ const FAILURE_SEVERITIES = [
     { id: 'rockfall',   label: 'Rockfall',      durLoss: 2, injuryMs: 0,                        xp: 5, msg: 'Loose rocks tumbled from the ceiling. You dove clear.' },
     { id: 'rockfall',   label: 'Rockfall',      durLoss: 2, injuryMs: 0,                        xp: 5, msg: 'A tremor shook the tunnel and the vein collapsed.' },
     { id: 'stuck',      label: 'Pickaxe Stuck', durLoss: 5, injuryMs: 0,                        xp: 0, msg: 'Your pickaxe lodged deep in the rock face. You yanked it free at great cost.' },
-    { id: 'cave_in',    label: 'Cave-in',       durLoss: 3, injuryMs: LIMITS.INJURY_PENALTY_MS, xp: 0, msg: 'A small cave-in forced you to retreat and rest!' }
+    // Kept as `cave_in` internally, but shown as "Pinned": the intensity cave-in (the
+    // blast / dig out / flee prompt) is a different event, and two things called
+    // "cave-in" with different rules was one too many.
+    { id: 'cave_in',    label: 'Pinned',        durLoss: 3, injuryMs: LIMITS.INJURY_PENALTY_MS, xp: 0, msg: 'A slab came down and pinned your leg. You crawled out, but you need to rest.' }
 ];
 
-function rollFailureSeverity() {
-    return FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
+/**
+ * One failed-dig outcome. A Pinned injury lasts as long as the depth says: it
+ * used to be a flat 15 minutes everywhere, which fell hardest on new players at
+ * the Surface Quarry, where digs fail most (#1193).
+ */
+function rollFailureSeverity(depth) {
+    const severity = FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
+    if (severity.injuryMs <= 0) return severity;
+    return { ...severity, injuryMs: depth?.pinnedMs ?? LIMITS.INJURY_PENALTY_MS };
 }
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
@@ -595,15 +613,69 @@ function tickConsumables(user) {
 }
 
 /**
- * A correct vein read promotes the payout to the next rung's multiplier while the
- * cave-in risk and durability cost stay where the miner put them. Reading the seam
- * makes it richer; it does not make the tunnel more dangerous. Keeping the risk
- * fixed is the point: the danger is chosen deliberately, and only ever by the
- * player — never handed to them by the outcome of a minigame.
+ * Lifts the payout to the multiplier `steps` rungs up the ladder (capped at the
+ * top) while the cave-in risk and durability cost stay where the miner put them.
+ * A rich seam makes the dig richer; it does not make the tunnel more dangerous.
+ * The danger is chosen deliberately, and only ever by the player.
  */
-function promoteIntensity(level) {
-    const next = INTENSITY_LEVELS.find(l => l.level === level.level + 1);
-    return next ? { ...level, multiplier: next.multiplier, promoted: true } : level;
+function promoteIntensity(level, steps = 1) {
+    if (!(steps > 0)) return level;
+    const top    = INTENSITY_LEVELS[INTENSITY_LEVELS.length - 1].level;
+    const target = INTENSITY_LEVELS.find(l => l.level === Math.min(top, level.level + steps));
+    if (!target || target.level === level.level) return level;
+    return { ...level, multiplier: target.multiplier, promoted: true, promotedBy: target.level - level.level };
+}
+
+// ─── ROCK SURVEY ─────────────────────────────────────────────────────────────
+
+/** How often the lamp reads the rock's stability correctly, 0..1. */
+function rockReadAccuracy(user) {
+    const m = user.mining;
+    const tier = m.pickaxes?.[m.equippedPickaxeIndex]?.tier ?? 1;
+    let accuracy = ROCK_READ.BASE_ACCURACY + (tier - 1) * ROCK_READ.PER_PICKAXE_TIER;
+    if (m.activeLamp === 'miners_lamp') accuracy += ROCK_READ.LAMP_BONUS;
+    return Math.min(ROCK_READ.MAX_ACCURACY, accuracy);
+}
+
+/**
+ * What the lamp shows before a dig. The seam grade is exact; the stability is a
+ * read that is right `accuracy` of the time and otherwise off by one step. The
+ * dig itself uses the true stability — `read` is only what the miner sees.
+ *
+ * Returns { seam, stability, read, accuracy }.
+ */
+function surveyRock(user) {
+    const seam      = weightedRoll(SEAM_GRADES);
+    const stability = weightedRoll(ROCK_STABILITY);
+    const accuracy  = rockReadAccuracy(user);
+
+    let read = stability;
+    if (secureRandom() >= accuracy) {
+        const at = ROCK_STABILITY.indexOf(stability);
+        const neighbours = [ROCK_STABILITY[at - 1], ROCK_STABILITY[at + 1]].filter(Boolean);
+        read = neighbours[Math.floor(secureRandom() * neighbours.length)];
+    }
+    return { seam, stability, read, accuracy };
+}
+
+const MAX_CAVE_IN_RISK = 0.9;
+
+/** A rung's cave-in risk scaled by a stability (true or read). */
+function riskAt(level, stability) {
+    return Math.min(MAX_CAVE_IN_RISK, level.caveInRisk * (stability?.riskMult ?? 1));
+}
+
+/**
+ * The intensity the dig actually runs at: the chosen rung, lifted by the seam
+ * grade, with its cave-in risk scaled by the rock's true stability.
+ */
+function digIntensity(picked, survey) {
+    const promoted = promoteIntensity(picked, survey?.seam?.promote ?? 0);
+    return {
+        ...promoted,
+        baseMultiplier: picked.multiplier,
+        caveInRisk:     riskAt(picked, survey?.stability),
+    };
 }
 
 // ─── FULL MINE EXECUTION ─────────────────────────────────────────────────────
@@ -627,6 +699,9 @@ function executeMine(user, depthId, options = {}) {
     const lampBefore   = m.activeLamp;
 
     const result = { success, xpEarned: 0, durabilityLost: 0, pickaxeBroke: false };
+    // A landed swing's XP, granted once the intensity block below knows whether
+    // the haul caved in (#1194).
+    let swingXp = 0;
 
     if (success) {
         const rolledTier = rollTier(user, depth);
@@ -665,8 +740,10 @@ function executeMine(user, depthId, options = {}) {
         if (m.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
         xpGain = Math.round(xpGain * streakMult);
 
-        applyDurabilityLoss(pickaxe, 1);
-        result.durabilityLost = 1;
+        // Careful digs cost the pickaxe nothing — that is the rung's whole point.
+        const baseWear = options.intensity?.durLoss === 0 ? 0 : 1;
+        if (baseWear > 0) applyDurabilityLoss(pickaxe, baseWear);
+        result.durabilityLost = baseWear;
 
         user.balance     += adjustedPayout;
         m.totalEarned    += adjustedPayout;
@@ -676,17 +753,20 @@ function executeMine(user, depthId, options = {}) {
         // so only the caller knows what the player actually walked away with.
 
         m.successfulMines  += 1;
+        // Kept so a haul abandoned in a cave-in can put the fail streak back
+        // where it was: fleeing is neither a success nor a failed swing.
+        result.priorConsecutiveFails = m.consecutiveFails;
         m.consecutiveFails  = 0;
         if (tier === 'legendary') m.legendaryFinds += 1;
         if (tier === 'event')     m.eventFinds     += 1;
 
-        const lvResult = applyXp(user, xpGain);
+        swingXp = xpGain;
 
         Object.assign(result, {
             ore, tier, rawPayout, finalPayout: adjustedPayout,
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
-            specialDrop, xpEarned: xpGain,
-            levelUp: lvResult.leveledUp ? lvResult : null,
+            specialDrop,
+            levelUp: null,
             cappedByHard,
             gatheringYield,
             streakMult,
@@ -698,7 +778,7 @@ function executeMine(user, depthId, options = {}) {
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
 
     } else {
-        const severity = rollFailureSeverity();
+        const severity = rollFailureSeverity(depth);
         applyDurabilityLoss(pickaxe, severity.durLoss);
         result.durabilityLost = severity.durLoss;
 
@@ -746,12 +826,10 @@ function executeMine(user, depthId, options = {}) {
             // What executeMine has already credited, and what mine/dig.js reverses if the
             // player flees.
             result.caveInPayout  = result.finalPayout ?? 0;
-            // The multiplier the vein read earned is held in escrow, not destroyed.
-            // Cave-in and the multiplier used to be exclusive branches, so reading the
-            // vein perfectly, caving in, and spending a blast charge to dig clear paid
-            // exactly the same as a one-in-three read — the charge bought back a haul
-            // stripped of the very bonus it was risked for. mine/dig.js pays this out only
-            // on a successful escape.
+            // The intensity multiplier (seam promotion included) is held in escrow,
+            // not destroyed. Cave-in and the multiplier used to be exclusive branches,
+            // so blasting clear bought back a haul stripped of the very bonus it was
+            // risked for. mine/dig.js pays this out only when the player blasts clear.
             result.caveInEscrow  = multiplier !== 1.0 && result.finalPayout
                 ? Math.round(result.finalPayout * (multiplier - 1.0))
                 : 0;
@@ -775,6 +853,16 @@ function executeMine(user, depthId, options = {}) {
         }
     }
 
+    // The swing's XP is paid only for a haul the player keeps (#1194). A cave-in
+    // holds it until mine/dig.js resolves the choice: blasting or digging out
+    // pays it, fleeing forfeits it. Holding it rather than granting and clawing
+    // it back means there is never a level-up to undo. It also means a swing
+    // cannot level the miner into Iron Will and so dodge its own cave-in.
+    if (result.success) {
+        if (result.caveIn) result.caveInXp = swingXp;
+        else grantSwingXp(user, result, swingXp);
+    }
+
     // An empty vein costs time and pickaxe wear but no stamina: a dry run should
     // burn your afternoon, not your ability to keep playing. Every harsher tier
     // still costs a point.
@@ -794,6 +882,120 @@ function executeMine(user, depthId, options = {}) {
 
     user.markModified('mining');
     return result;
+}
+
+// ─── CAVE-IN RESOLUTION ──────────────────────────────────────────────────────
+
+/** Books a landed swing's XP onto the user and the result it is reported from. */
+function grantSwingXp(user, result, xp) {
+    const lvResult = xp > 0 ? applyXp(user, xp) : null;
+    result.xpEarned = xp;
+    result.levelUp  = lvResult?.leveledUp ? lvResult : null;
+}
+
+/**
+ * The player blasted clear of a cave-in: spend `cost` charges (the rung's
+ * blastCost) and release the escrowed intensity bonus, clamped to the daily hard
+ * cap the same way the uninterrupted path clamps it, and the swing's held XP.
+ */
+function blastClearCaveIn(user, result, chargeType, cost = 1) {
+    const m = user.mining;
+    if (chargeType) {
+        m.charges[chargeType] = Math.max(0, (m.charges[chargeType] ?? 0) - cost);
+    }
+    result.caveInChargesSpent = chargeType ? cost : 0;
+    if (result.caveInEscrow > 0) {
+        const remainingCap = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+        const bonus        = Math.min(result.caveInEscrow, remainingCap);
+        if (bonus > 0) {
+            user.balance          += bonus;
+            m.totalEarned         += bonus;
+            m.dailyCoins          += bonus;
+            result.finalPayout     = (result.finalPayout ?? 0) + bonus;
+            result.caveInBonusPaid = bonus;
+        }
+    }
+    result.caveInEscaped = true;
+    grantSwingXp(user, result, result.caveInXp ?? 0);
+    countCaveInOutcome(m, 'blast');
+    user.markModified('mining');
+}
+
+/** How a cave-in ended — blast, digOut or flee — tallied for tuning (#1192). */
+function countCaveInOutcome(m, outcome) {
+    if (!m.caveInOutcomes || typeof m.caveInOutcomes !== 'object') m.caveInOutcomes = {};
+    m.caveInOutcomes[outcome] = (m.caveInOutcomes[outcome] ?? 0) + 1;
+}
+
+/**
+ * The player dug out of a cave-in by hand: `staminaCost` stamina buys back the
+ * ore executeMine already credited and the swing's held XP, but not the
+ * escrowed intensity bonus — you carry out what you can. The option for a miner with no charges to blast with.
+ */
+function digOutCaveIn(user, result, staminaCost) {
+    const m = user.mining;
+    m.stamina = Math.max(0, (m.stamina ?? 0) - staminaCost);
+    result.caveInStaminaSpent = staminaCost;
+    result.caveInEscrowLost   = result.caveInEscrow ?? 0;
+    result.caveInEscaped      = true;
+    result.caveInDugOut       = true;
+    grantSwingXp(user, result, result.caveInXp ?? 0);
+    countCaveInOutcome(m, 'digOut');
+    user.markModified('mining');
+}
+
+/**
+ * The player fled a cave-in: the haul is buried, so undo everything executeMine
+ * booked for it — the coins, the gathering-yield charge, the find counters, the
+ * material drop and the success tally — and flag the result so every later
+ * reader (quests, reveal, announcements, the result embed) treats the find as
+ * not kept. `result.success` stays true because the swing itself landed. The
+ * swing's XP was held back by executeMine and is forfeited with the haul (#1194):
+ * fleeing a legendary must not still pay legendary-tier XP.
+ */
+function abandonCaveIn(user, result, { refundEffectCharge } = {}) {
+    const m = user.mining;
+    result.caveInLostPayout = (result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0);
+    result.caveInLostXp     = result.caveInXp ?? 0;
+    result.xpEarned         = 0;
+    result.levelUp          = null;
+
+    if (result.caveInPayout) {
+        user.balance   -= result.caveInPayout;
+        m.totalEarned  -= result.caveInPayout;
+        m.dailyCoins   -= result.caveInPayout;
+    }
+    result.finalPayout = 0;
+
+    // The doubling charge bought ore that is now buried — hand it back rather
+    // than billing a Black Market item for coins never kept.
+    if (result.gatheringYield) {
+        if (refundEffectCharge) refundEffectCharge(user, result.gatheringYield.effect);
+        result.gatheringYield = null;
+    }
+
+    if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
+    if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
+
+    if (result.specialDrop) {
+        const key = result.specialDrop.itemId;
+        if (m.materials?.[key] != null) {
+            m.materials[key] = Math.max(0, m.materials[key] - 1);
+        }
+        result.specialDrop = null;
+    }
+
+    m.successfulMines = Math.max(0, (m.successfulMines ?? 0) - 1);
+    if (result.priorConsecutiveFails != null) m.consecutiveFails = result.priorConsecutiveFails;
+
+    result.caveInAbandoned = true;
+    countCaveInOutcome(m, 'flee');
+    user.markModified('mining');
+}
+
+/** A successful swing whose haul the player actually walked away with. */
+function keptFind(result) {
+    return !!result?.success && !result.caveInAbandoned;
 }
 
 // ─── MINE DAILY QUESTS ───────────────────────────────────────────────────────
@@ -857,6 +1059,10 @@ function updateMineQuestProgress(user, result, depthId) {
 
     if (!mineQuests.length) return;
 
+    // A haul abandoned in a cave-in was never brought up, so it counts toward
+    // nothing that rewards a find — only toward the dig itself.
+    const kept = keptFind(result);
+
     for (const quest of mineQuests) {
         const template = MINE_QUEST_TEMPLATES.find(t => t.id === quest.questId);
         if (!template) continue;
@@ -866,30 +1072,30 @@ function updateMineQuestProgress(user, result, depthId) {
                 quest.progress += 1;
                 break;
             case 'rare_plus_finds':
-                if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier))
+                if (kept && ['rare', 'epic', 'legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'epic_plus_finds':
-                if (result.success && ['epic', 'legendary', 'event'].includes(result.tier))
+                if (kept && ['epic', 'legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'legendary_plus_finds':
-                if (result.success && ['legendary', 'event'].includes(result.tier))
+                if (kept && ['legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'crits':
-                if (result.success && result.isCrit) quest.progress += 1;
+                if (kept && result.isCrit) quest.progress += 1;
                 break;
             case 'earn_coins':
-                if (result.success && result.finalPayout > 0)
+                if (kept && result.finalPayout > 0)
                     quest.progress = Math.min(quest.progress + result.finalPayout, template.target);
                 break;
             case 'material_drops':
-                if (result.success && result.specialDrop) quest.progress += 1;
+                if (kept && result.specialDrop) quest.progress += 1;
                 break;
             case 'success_streak':
-                if (result.success) quest.progress += 1;
-                else               quest.progress  = 0;
+                if (kept) quest.progress += 1;
+                else      quest.progress  = 0;
                 break;
             case 'depth_mines':
                 if (depthId === template.depth) quest.progress += 1;
@@ -1153,8 +1359,8 @@ async function claimDigCooldown(user) {
 
 /**
  * The post-roll bonus stack: pity counter (a rare find abandoned in a cave-in
- * does not reset it), featured-depth bonus, pet yield, Wilderness district
- * bonus (clamped to the daily hard cap), the forfeited-payout scaling for a
+ * does not reset it), featured-depth bonus, pet yield and Wilderness district
+ * bonus (each clamped to the daily hard cap), the forfeited-payout scaling for a
  * hard-capped dig, and the best-payout stat. Mutates the user and annotates
  * the result for the renderer.
  */
@@ -1162,7 +1368,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     const m = user.mining;
 
     // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
-    const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
+    const keptRareFind = keptFind(result) && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
     if (keptRareFind) {
         m.sinceRare = 0;
     } else {
@@ -1171,8 +1377,12 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
 
     // Yield bonuses below are gated on result.finalPayout > 0, which an
     // abandoned cave-in resets to 0 — so abandoning correctly forfeits these too.
+    // Every bonus below is clamped to what is left under the daily hard cap, the
+    // same way the intensity multiplier and the blast escrow are.
+    const capRoom = () => Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+
     if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
-        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
+        const featBonus = Math.min(Math.round(result.finalPayout * featuredPayoutBonus), capRoom());
         if (featBonus > 0) {
             user.balance             += featBonus;
             m.totalEarned            += featBonus;
@@ -1183,7 +1393,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     }
 
     if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+        const bonus = Math.min(Math.round(result.finalPayout * petMineYieldPct / 100), capRoom());
         if (bonus > 0) {
             user.balance        += bonus;
             m.totalEarned       += bonus;
@@ -1195,9 +1405,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     }
 
     if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        const bonus = Math.min(Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS), capRoom());
         if (bonus > 0) {
             user.balance          += bonus;
             m.totalEarned         += bonus;
@@ -1275,7 +1483,15 @@ module.exports = {
     consumableStatus,
     tickConsumables,
     promoteIntensity,
+    rockReadAccuracy,
+    surveyRock,
+    riskAt,
+    digIntensity,
     executeMine,
+    blastClearCaveIn,
+    digOutCaveIn,
+    abandonCaveIn,
+    keptFind,
     assignDailyMineQuests,
     updateMineQuestProgress,
     prepareDigUser,

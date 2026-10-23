@@ -245,7 +245,7 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
 
         let parsed;
         try {
-            const config = resolveProviderConfig(guildSettings.ai);
+            const config = resolveProviderConfig(guildSettings.ai, { guildId: interaction.guild.id });
             // Provider-native structured output where the provider supports it,
             // and the fence-stripping, budget-growing retry in utils/modelJson as
             // the fallback where it does not (#1044). Tools are off on both paths

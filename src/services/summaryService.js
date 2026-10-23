@@ -84,13 +84,15 @@ async function runSummaryJob(job, client) {
     const header = `**${job.label}** — <#${job.sourceChannelId}>\n${date}\n\n`;
     const full = header + summary;
 
+    // The digest is model output over members' messages, so nothing in it pings.
+    const noPings = { parse: [] };
     if (full.length <= 2000) {
-        await dstChannel.send(full);
+        await dstChannel.send({ content: full, allowedMentions: noPings });
     } else {
-        await dstChannel.send(header.trimEnd());
+        await dstChannel.send({ content: header.trimEnd(), allowedMentions: noPings });
         let remaining = summary;
         while (remaining.length > 0) {
-            await dstChannel.send(remaining.slice(0, 2000));
+            await dstChannel.send({ content: remaining.slice(0, 2000), allowedMentions: noPings });
             remaining = remaining.slice(2000);
         }
     }

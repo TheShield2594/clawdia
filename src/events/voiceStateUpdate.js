@@ -1,5 +1,6 @@
 const { handleVoiceStateUpdate } = require('../services/tempVoiceService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { grantableRole } = require('../utils/sensitiveRolePermissions');
 const User = require('../models/User');
 const { checkRivalry } = require('../services/rivalryService');
 
@@ -128,7 +129,8 @@ async function handleVoiceXp(oldState, newState, client) {
             }
             if (guildSettings.levelRoles?.length) {
                 const reward = guildSettings.levelRoles.filter(lr => lr.level <= user.level).sort((a, b) => b.level - a.level)[0];
-                if (reward) await member.roles.add(reward.roleId).catch(() => {});
+                const role = reward && grantableRole(guild, reward.roleId, 'level-reward', member.id);
+                if (role) await member.roles.add(role.id).catch(() => {});
             }
         }
 

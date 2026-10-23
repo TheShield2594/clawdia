@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 // The crash point and the multiplier curve for `/casino crash`, lifted out of
 // crash.js (#785). It measured 26.3% lines / 16.1% branches: the curve decides
@@ -25,9 +26,9 @@ const MAX_CRASH = 100.00;
  * (#873, pass 24). It also rounded to the nearest cent rather than down, so a
  * round that busted at 1.995× paid a 2.00× target.
  *
- * `rng` returns a float in [0, 1) — Math.random by default.
+ * `rng` returns a float in [0, 1) — secureRandom (crypto) by default.
  */
-function generateCrashPoint(rng = Math.random) {
+function generateCrashPoint(rng = secureRandom) {
     const raw = 0.99 / (1 - rng());
     // The epsilon keeps a quotient that is a whole cent in exact arithmetic
     // (0.99 / 0.495 = 2) from flooring a cent short on its float error.

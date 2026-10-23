@@ -51,7 +51,7 @@ async function handleBuy(interaction, user, currency, override = {}) {
     const m = user.mining;
 
     const itemId  = override.itemId ?? interaction.options.getString('item');
-    const qty     = override.quantity ?? interaction.options.getInteger('quantity') ?? 1;
+    const qty     = override.quantity ?? interaction.options?.getInteger('quantity') ?? 1;
 
     const consumableDef = CONSUMABLES[itemId];
     const blastDef      = BLAST_PACKS.find(b => b.id === itemId);

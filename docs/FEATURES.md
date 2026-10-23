@@ -37,6 +37,96 @@ cannot see it, so it says so instead of answering from the caption alone. The
 same happens to an image too large or too numerous to send. Nothing is
 downloaded for a model that cannot use it.
 
+**Voice messages**:
+
+With **Listen to voice messages** on, a voice message or audio clip sent to the
+AI is transcribed and answered like typed text. That means in a DM, or as a
+reply to one of the bot's messages in a server, since a voice message cannot
+carry a mention. The transcript is the turn: the model is told it was spoken,
+and the history, memory and conversation search all keep the words rather than
+the audio.
+
+Transcription uses the server's own keys, with no new setting: Gemini for a
+server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
+Gemini (`gemini-3.8-flash`). A clip only goes to a service that reads its
+format, so raw AAC goes to Gemini, and a transcription that fails on one
+service is tried once on the other. A server on Claude, OpenRouter or Ollama
+needs an OpenAI or Gemini key for it. Each clip is a separate charge from that
+provider, recorded in the AI usage ledger and counted toward the monthly budget
+like any other call: a server that is out of budget is told so before anything
+is transcribed. Clips over ten minutes or 19 MB are refused with a reason rather
+than transcribed, and the clip is downloaded through the same SSRF guard as
+images.
+
+**Spoken replies**:
+
+**Spoken replies** reads the AI's answer aloud and posts the audio after the
+text. *When spoken to* does it for a reply to a voice message; *Always in DMs*
+also does it for every reply in a DM. The text is always posted too, so the
+answer stays readable and searchable, and the audio only follows once the reply
+is final: a streamed reply is read once it has finished, and a reply the
+outbound moderation check withheld is never read.
+
+Speech uses the same keys as transcription, in the same order: OpenAI's
+`gpt-4o-mini-tts`, posted as a Discord voice message, or Gemini's speech model
+(`GEMINI_TTS_MODEL`), posted as a WAV attachment. Markdown, links, mentions and
+code are left out of what is read, and only about the first 1,500 characters
+are spoken, ending with "the rest is in the text". Each spoken reply is recorded
+in the usage ledger and counts toward the monthly budget. If speech fails, or
+the server is out of budget, the reply is the text alone, with no error.
+
+**Images**:
+
+With **Let the AI make images** on, the model has a `generate_image` tool:
+"draw a logo for the guild" or "make a banner for Friday's event" gets a picture
+posted after the reply, with the prompt as its alt text. It takes a prompt and a
+shape (square, landscape or portrait) and makes one image per call.
+
+**Image service** picks which service draws first: OpenAI, Gemini, OpenRouter
+or Higgsfield, each with the server's own key for it (OpenRouter's is the chat
+key field; Higgsfield's is under the image settings, as `KEY_ID:KEY_SECRET`). On
+**Automatic** it follows the chat provider the way voice does: Gemini for a
+server on Gemini, OpenRouter for one on OpenRouter, otherwise OpenAI. Whichever
+goes first, every other service the server has a key for is tried after it when
+it fails.
+
+Each service has a model field. OpenAI takes a gpt-image model (default
+`gpt-image-1`, at medium quality, or `OPENAI_IMAGE_MODEL`); Gemini an image model
+(default `gemini-2.5-flash-image`, or `GEMINI_IMAGE_MODEL`); DALL·E and Imagen are
+refused. OpenRouter takes any image model's `author/model` ID (default
+`google/gemini-2.5-flash-image`) and draws through its `/api/v1/images`
+endpoint. Higgsfield takes a text-to-image endpoint ID (default
+`higgsfield-ai/soul/v2/standard`); its requests are queued, so the bot submits,
+polls until the picture is ready, and cancels a request still queued when the
+reply runs out of time.
+
+Cost: OpenRouter reports what each image cost, and Higgsfield's estimate
+endpoint is asked before each one, so both count toward the monthly cost limit
+at that price. OpenAI and Gemini are priced from the table for gpt-image-1,
+gpt-image-1-mini and Gemini image models; another model there is counted in
+tokens but not in cost. With no key for any of them the tool is not offered. A prompt the service
+refuses is not retried on another one; the model is told it was refused and
+says so. An image costs far more than a reply, so each is recorded in the usage
+ledger and counted toward the monthly budget, a server that is out of budget
+gets no image, each member gets five an hour, and one reply carries at most two.
+It needs no approval, since it changes nothing but the conversation, and it is
+offered to `/ai task` and scheduled tasks too, where the guild's five an hour and
+the hourly tool budget bound it.
+
+**Sub-agents in deep tasks**:
+
+A deep task (`/ai task`, or a scheduled task in deep mode) can hand independent
+pieces of its work to sub-agents with a `delegate` tool — "compare these four
+products" becomes four lookups running at once, each with a fresh context, and
+the task writes its report from their answers. Up to four sub-agents at a time
+and eight per task, each with six tool rounds and at most four minutes, inside
+the task's own clock. Sub-agents only look things up: they get the read-only
+tools (web access, and a connection's tools only where they would run in a
+scheduled task without asking), never in-channel actions, images, notes or
+`delegate` itself. Their tool calls come out of the task's own allowance, they
+take no message or deep-task slot of their own, and their tokens count toward
+the monthly budget. Their calls show on the task's progress line and footer.
+
 **Knowing its own commands**:
 
 Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because
@@ -109,7 +199,7 @@ unless someone hand-added the word, and the model then answers blind even though
 the fact was on file.
 
 So the knowledge base has an optional second tier: **semantic retrieval**, off
-by default under **AI → Chat**. With it on, each entry is turned into a vector
+by default under **AI → Knowledge Base**. With it on, each entry is turned into a vector
 when it is written and the question into one when it is asked, and the nearest
 few by meaning are unioned with the keyword hits before the prompt is assembled
 — so the paraphrase reaches the entry, and nothing about the keyword tier or the
@@ -154,16 +244,26 @@ model is told the call was refused and answers from what it has.
 
 Tools that write something wait for a person. The **Approval** setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until
-the person who asked, or anyone who can manage the server, says so. A guild
-can limit that to members who can manage the server. That matters when a
-connection runs on an admin's token, because otherwise any member can ask for a
-call and approve it. Adding a first connection turns approval on for writes,
+someone who can manage the server says so. A guild can let the person who asked
+approve their own call instead, which catches a model that was talked into
+something but not a member who wants the call made. A connection signed in with
+OAuth — somebody's own mailbox or calendar — is offered only to members who can
+manage the server, and any other connection can be limited the same way with
+its **Only members who can manage this server** switch (`managers_only` in the
+config file). Adding a first connection turns approval on for writes,
 since connecting a server is not by itself consent to unattended ones.
 
 It runs the other way too. A tool that gets halfway and needs one more fact can
 ask, and the question appears in the channel as a form to fill in — bounded to
 two questions a reply, and labelled with which server is asking, because a real
 one will not ask for a password or a key.
+
+A scheduled task has nobody to click those buttons, so a tool that needs
+approval is refused there. Each connection has a **Run without asking in
+scheduled tasks** list for the exceptions: name `create_event` on a calendar
+connection and "every morning, put today's classes on my calendar" can write
+without anyone awake, while the same call from a chat message still asks. The
+list is only read by scheduled runs, and never covers the bot's own tools.
 
 Approvals and the activity rollup below both need the bot to be the one making
 the call, which on Claude it is not by default — Anthropic's connector opens the
@@ -225,6 +325,12 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `command` instead of `url` runs the server as a local process and speaks MCP
+  over its stdin/stdout — the transport most servers ship with. Config file
+  only ([details](SETUP_GUIDE.md#mcp-servers))
+- `allow_private: true` lets an entry reach a server on your own network — a
+  LAN address or plain `http://` — which no dashboard connection can
+  ([details](SETUP_GUIDE.md#mcp-servers))
 - `guilds: ["<server id>", …]` limits an entry to the Discord servers named;
   without it, every server with AI on can use the file's credentials
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
@@ -238,6 +344,15 @@ Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers)
 - Set an AI chat channel in dashboard
 - Users chat naturally, bot responds to every message and @-mentions/replies anywhere
 - Bot shows typing indicator while processing
+
+**Direct messages:**
+- Set `AI_DM_GUILD_ID` to your server's ID and its admins (Manage Server) can DM
+  the bot instead of mentioning it in a channel
+- A DM is answered as though it were sent in that server: its provider, system
+  prompt, memories, knowledge base, MCP connections and budget. Approvals,
+  reminders and scheduled tasks set from a DM come back to the DM
+- Every DM goes to the AI, so no mention is needed. Nobody else gets an answer,
+  and nothing besides the AI (leveling, automod, quests) runs in DMs
 
 **Customization:**
 
@@ -254,7 +369,59 @@ Clawdia pins facts she learns about a user across conversations. `/ai memories`
 lists them and `/ai memories delete <number>` removes one. React 📌 to one of her
 messages to pin it yourself; she can also ask to save one herself with the
 `save_memory` tool, which posts approval buttons and saves nothing until someone
-clicks. Ten per user, per server.
+clicks, and drop one that has gone stale with `forget_memory`. Ten per user, per
+server by default; **Memories per member** under **AI → Knowledge Base** raises it as far
+as fifty. Every memory rides in every reply's prompt, so more of them cost more
+per message.
+
+**Save memories without asking** turns the approval buttons off for those two
+tools. The model then remembers what you tell it about yourself as it goes, and
+replaces what has changed, the way a personal assistant would. It is meant for a
+server you run for yourself: it only ever saves what the person it is replying
+to said about themselves, but nobody reviews it. It needs AI actions on.
+
+A scheduled task carries the memories of the person who set it up, so "plan my
+week" knows whose week it is.
+
+**Learning**:
+
+With **Let the AI learn** on, the model gets a `learn` tool. After it finishes
+something that took several steps, or after you correct it, it writes down how
+to do it right next time as a note in the knowledge base, tagged `learned`. The
+notes come back through the same retrieval as every other entry (semantic tier
+included) when a later question is about the same thing. A note is keyed by its
+title, so learning the same thing again rewrites the note instead of adding
+another. The notes are guild-wide, so the tool is only offered to members with
+Manage Server, never in scheduled tasks, and capped at 200 notes a server. Read,
+edit or delete them in the dashboard's knowledge base like any other entry.
+
+**Web access**:
+
+With **Enable web access** on, the model has a `read_webpage` tool that fetches
+one public page and reads its text — a search result whose snippet is not
+enough, or a link somebody pasted. The URL is the model's choice, so it goes
+through the same SSRF guard as every dashboard URL: private and reserved
+addresses are refused, on every redirect. Pages that need a login or JavaScript
+come back empty; for those, an operator can run Playwright's MCP server as an
+optional browser sidecar
+([setup](SETUP_GUIDE.md#a-browser-for-the-ai)).
+
+With `SEARXNG_URL` set by the operator as well, the model also has a
+`web_search` tool over that SearXNG instance. It returns titles, URLs and
+snippets, labelled as third-party text the model must not take instructions
+from, and the model is told to cite the URLs it uses. It is read-only, so it
+needs no approval and is offered to scheduled tasks too. Setup is in
+[SETUP_GUIDE.md](SETUP_GUIDE.md#web-search-searxng).
+
+**Searchable conversation history**:
+
+The chat keeps the last few turns per channel and a rolling summary, which is
+enough context for a reply but not for "what did we decide about the trip last
+month?". With **Searchable conversation history** on, every AI turn is also
+written to a log kept for a year, and the model gets a `search_conversations`
+tool over it — keyword search across every channel and DM. A member only ever
+searches their own conversations; the filter is the person asking, not anything
+the model passes. `/mydata` exports and erases the log with everything else.
 
 Older turns are not simply forgotten when they fall past the history window:
 what drops out is folded into a short rolling summary of the conversation, which
@@ -314,7 +481,7 @@ reachable from inside a story.
 
 ### Event Commentary
 
-With **Enable event commentary** switched on under **AI → Chat**, the bot adds
+With **Enable event commentary** switched on under **AI → Abilities**, the bot adds
 two or three sentences of colour commentary — in the server's own configured
 persona — to the announcements it already posts when a war, an economy season,
 or the weekly champion competition resolves.
@@ -363,7 +530,8 @@ The whole reply goes to one of two checkers, picked by what the server has
 connected:
 
 - **OpenAI's free `omni-moderation-latest` endpoint** whenever any OpenAI key is
-  present (the dashboard key or the bot-wide one). The policy here is OpenAI's own
+  present (the dashboard key, or the bot-wide one for a server in
+  `AI_ENV_KEY_GUILDS`). The policy here is OpenAI's own
   default set of flagged categories — hate, harassment, sexual, violence,
   self-harm and the rest — and the reply is flagged if any of them trips.
 - **Otherwise the guild's own provider**, asked one fixed *"does this violate the
@@ -502,6 +670,22 @@ Set a moderation log channel to track:
 /leaderboard         - Server leaderboard
 ```
 
+Every ranked board leads with a picture card: the top three on a podium with
+their avatars in gold, silver and bronze (a crown on first), the rest as rows
+whose bar measures them against first place, and your own standing under the
+board when you are off it. The same card draws `/leaderboard` (every type),
+`/achievements leaderboard`, `/streak`,
+`/pet leaderboard` (each pet in its species' portrait), `/season leaderboard`,
+`/duel leaderboard`, `/syndicate leaderboard` (under the leader's avatar) and
+`/fish tournament status`, each in its own colours. The text board stays under
+the card with every name and number on it; if the card cannot be drawn the text
+goes out alone.
+
+The Hall of Champions is drawn as a wall of plaques instead: a row per week,
+newest first and labelled with its dates, and a plaque per track (hunter,
+miner, angler, explorer) in that track's colours with the champion's avatar,
+name and total. A track nobody won that week keeps an empty plaque.
+
 **Customization:**
 - XP rate multiplier
 - Level-up message
@@ -525,7 +709,12 @@ third of the code. The sections below cover it in full.
 /casino roulette     - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
 /casino jackpot      - View the current progressive jackpot pool
                        Fed 0.5% of every casino bet. Drops on a random trigger that grows
-                       with each bet, or outright to a Triple Wild on /casino slots.
+                       with each bet, or to a Triple Wild on /casino slots. Either pays
+                       the pool up to a cap set by the winning bet; the rest stays in it.
+/casino slots        - 3-reel slot machine on real reel strips: 3×3 window, Wilds, Boosts,
+                       Scatter free spins, a Heat meter (10 paid spins fill it; the next is a Hot Spin),
+                       Spin / ½ / 2× / Max buttons and a paytable with the odds. Returns 94%.
+/casino slotsconfig  - (Admin) Triple Wild announcement: on/off, @here, and channel
 /quiz                - Answer trivia for rewards
 /boost               - Activate economy boosts
 ```
@@ -567,25 +756,48 @@ Coal Tunnels down, and the Abyss adds two event ores of its own.
 Once a depth is unlocked it stays accessible for good — the level requirement is
 checked at purchase, not every dig.
 
-**A dig** is a risk choice followed by a vein read. You pick how hard to push —
-the choice is yours, and it is the only thing that sets the danger:
+**A dig** starts with your lamp reading the rock, then you choose how hard to
+push against what it shows:
 
-| Push | Payout | Cave-in risk | Pickaxe wear |
-|---|---:|---:|---:|
-| ☀️ Surface | 0.7× | 0% | 1 |
-| 🪨 Shallow | 1.0× | 5% | 1 |
-| 🔩 Mid | 1.4× | 12% | 2 |
-| 💎 Deep | 2.0× | 20% | 3 |
+- **Seam** — ▫️ Thin, ✨ Good or 💎 Rich. Read exactly. A good seam pays one rung
+  higher, a rich one two, at the risk you chose.
+- **Stability** — 🟩 Solid (half the risk), 🟨 Seamed, or 🟥 Fractured (1.75× the
+  risk). This is only a read: it is right 60% of the time with a Wooden Pickaxe,
+  more with better pickaxes and a Miner's Lamp, and a wrong read is one step off.
+  The result tells you what the rock really was.
 
-Then the tunnel shows you where the seam runs, the dust settles, and you call it.
-A correct read promotes the payout one rung — Deep pays the Abyss's **3×** — at the
-risk you already chose. 🌑 Abyss cannot be selected; it is only ever earned.
+| Push | Payout | Base cave-in risk | Pickaxe wear | Blast cost |
+|---|---:|---:|---:|---:|
+| 🪶 Careful | 0.8× | 0% | 0 | — |
+| 🪨 Steady | 1.0× | 5% | 1 | 1 charge |
+| 🔨 Hard | 1.4× | 12% | 2 | 2 charges |
+| 🧨 Reckless | 2.0× | 20% | 3 | 3 charges |
 
-Pass `intensity:` on the command to skip the prompt and dig straight away. An
-unanswered prompt repeats whatever you dug last.
+🌋 Frenzied (**3×**) cannot be selected: it is what a good or rich seam pays at
+Reckless or Hard.
 
-Cave in and you choose again: spend a blast charge to dig clear and keep the whole
-haul, multiplier included, or flee and lose it.
+Pass `intensity:` on the command to skip the prompt and dig without seeing the
+read first. An unanswered prompt repeats whatever you dug last.
+
+Cave in and you choose again:
+
+- **Blast clear** — spend the rung's blast cost in your pickaxe's charges and keep
+  the whole haul, multiplier included.
+- **Dig out** — spend 2 stamina and keep the ore, but not the intensity bonus.
+  Works with any pickaxe, including the Wooden one, which takes no charges.
+- **Flee** — lose the haul, and the swing's XP with it.
+
+The swing's XP is held until you choose: blasting or digging out pays it in
+full, fleeing pays none. Leave the prompt and you blast clear if you can afford to, and flee if not.
+
+Every result ends with **⛏️ Dig again**, which digs the same depth and reads the
+rock afresh, and a live countdown to when your next dig opens.
+
+A dig whose ore came up leads with a picture card, the same one `/hunt start`
+and `/fish cast` draw: the ore's art in its tier's colour, the depth behind it,
+the payout set against your best dig and the server record, the coins and XP,
+and a banner for a cave-in you blasted or dug your way out of. A failed swing
+or a haul left in a collapse stays text-only.
 
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
@@ -632,12 +844,24 @@ evolution track.
 /pet feed <material>      - Feed a pet (favourite foods restore most, grant bonus XP)
 /pet rename <slot> <name> - Rename a pet
 /pet release <slot>       - Release a pet permanently
+/pet codex                - Every species: the ones you have owned, and where the rare ones come from
+/pet vacation <on|off>    - Pause hunger for all your pets for up to 14 days
+/pet battle [opponent] [bet] [rated] - Fight a wild pet, or challenge a member (for coins, or on the rated ladder)
 ```
 
-- **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield.
+- **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield. Rob and crime passives add percentage points to the success chance and are shown as "pts"; the others multiply a payout and are shown as "%".
 - **Four rare pets** — Eagle, Shark, Crystal Fox, and Lantern Owl — are not sold anywhere. Each is tied to one grind track and drops at a 4% chance alongside a legendary-tier result there. Rare pets are exempt from the slot limit, so a full roster can never lock one out.
 - **Progression:** pets level to 30 across three evolution stages (1–9, 10–19, 20+), with stage multipliers of 1.0×/1.5×/2.0× on the passive plus per-level growth. Stacked bonuses of the same type cap at **40%**.
-- **Upkeep:** hunger decays 10/day (5/day while resting). Below 30 a pet is starving, and a pet left starving for 3 days runs away. Base capacity is 3 slots, expandable 3 times.
+- **Upkeep:** hunger decays 10/day. Below 30 a pet's passive switches off, and a pet left at zero hunger for 3 days runs away; a Revive Scroll calls it home with its level and record intact. Base capacity is 3 slots, expandable 3 times.
+- **Warnings and vacation:** the bot DMs a pet's owner once when its passive switches off and once when it runs out of food ("runs away in about 3 days"); each warning is sent once per crossing and re-arms when the pet is fed. `/notifications pets` turns them off. `/pet vacation on` pauses hunger, bond drain and the runaway clock for every pet for up to 14 days; meanwhile passives are off and pets can't battle, train or earn Pet of the Week credit.
+- **Codex and evolution:** `/pet codex` shows every species as a collection card, owned ones in colour and the rest as grey silhouettes, with each rare pet's hint. Reaching Stage 2 or 3 posts its own public reveal with the companion card, the new title and the passive before and after.
+- **Bond:** earned by care, not by age. Feeding (+2), playing (+2), training (+1) and battling (+1) raise it, at most 4 points a pet a day; it drains 2 a day while the pet is below 30% hunger, and running away costs 25. Five tiers — Wary, Friendly (15), Trusted (35), Devoted (60), Soulbound (90) — add 1–6% to the passive, show as a title on the pet, and from Trusted up give the companion card a frame in the tier's colour. The **Most Loyal** leaderboard ranks by bond. Pets that predate it were seeded from their age, capped at 50.
+- **Training:** the Train buttons on `/pet status` pick a focus — **Power** (+0.4% ATK a session), **Guard** (+1% DEF) or **Agility** (+3% SPD and +0.5 pts crit) — up to 10 sessions each, for a small permanent edge in battle. A session costs 8 hunger (and can take a pet below the passive threshold), needs a fed pet, and each pet can train once every 8 hours. Training shows on the companion card under the battle stats.
+- **Companion card:** `/pet status` and the Showcase button draw each pet as a card: its portrait and evolution stage, a level ring, hunger (with where the passive cuts out) and bond bars, its passive and signature move, battle stats, training and record, and what it has to say. Every number on the card is also in the text beside it.
+- **Battles:** `/pet battle` fights a wild pet for XP, or a member for XP or coins. Each personality wins a different way (Energetic strikes first more often, Mischievous crits more, Loyal outlasts, Lazy shrugs hits off) and every pairing is close to even. Every species, wild ones included, has a **signature move** named in the battle log: the Dog's Stand Firm, the Cat's Nine Lives, the Bird's Flurry, the Fish's Slippery Scales, the Fox's Feint, the Wolf's Pack Howl, the Eagle's Talon Dive, the Shark's Frenzy, the Crystal Fox's Crystal Ward and the Lantern Owl's Lantern Flare. Species pairings at equal level stay within about 42–58%, and the four rare pets fight about 1% better, which wins them at most around 62% of fights against a shop pet. Wagered battles are level-matched: both pets fight at the lower pet's level. The wins leaderboard counts member battles only.
+- **Member battles:** a challenge names both owners. On accepting, the defender picks which battle-ready pet answers from a menu (the closest level match is suggested, and fights if they don't choose within 30 seconds). The fight then runs in up to three **stance rounds**: both owners pick **Strike**, **Guard** or **Trick** in secret (Strike beats Trick, Trick beats Guard, Guard beats Strike), and the owner who reads the other gets a round in which their pet hits 25% harder and the other hits 20% softer. Each round has 20 seconds; an owner who doesn't pick gets a random stance, and a round neither owner picks in abandons the battle and refunds any wager. A pet can only be in one battle at a time, and if the bot restarts mid-battle, a sweep refunds both stakes within about ten minutes. Each round is revealed with its exchanges, critical hits and knockout, on a banner showing both pets' portraits. Wild battles stay automatic.
+- **Ranked ladder:** `/pet battle opponent:@member rated:True` fights a rated battle. Every pet starts at 1200 and rated battles move both pets' ratings Elo-style (level-matched, like a wager). The two pets must be within 300 rating of each other, and two owners may fight at most 3 rated battles against each other in any 24 hours. Seasons last 30 days: at the end every rating moves halfway back toward 1200, the top three pets earn a season title (e.g. *S2 Ladder Champion*) shown as a ribbon on their companion card, and the recap is posted to the economy announcement channel. `/pet leaderboard type:Rating` shows the current season.
+- **Pet of the Week** goes to the pet with the most care that week, counted at most 3 times per pet per day, and pays its owner 5,000 coins by default. The announcement carries the winner's companion card with the ribbon on.
 
 ### Trading & Server Investment
 
@@ -809,7 +1033,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 **Commands:**
 
 ```text
-/explore go [region]   - Set out on an expedition (1 stamina, 60s cooldown)
+/explore go [region] [route] - Set out on an expedition (1 stamina, 60s cooldown)
 /explore travel        - Unlock and move between regions
 /explore regions       - Browse every region, requirements, and progress
 /explore journal       - Reread your most recent finds
@@ -823,12 +1047,23 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks → Starfall Wastes (level + coin gated, rising payouts)
 - Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's), Arctic Tundra (winter hunt) — open only while their seasonal event runs, and they drop event currency for the event shop
 - A bare `/explore go` follows your active region, and reroutes itself if that region has gone out of season or been switched off
+- Every result carries three route buttons that run the next expedition in the same region, through the same cooldown, lock and server gates as the slash command. The route you just took is highlighted, so "same again" stays one click
+
+**Routes and streaks:**
+- **🥾 Main Trail** — traps less than half as often, −10% coins. The route for protecting a streak
+- **🧭 Off the Path** — landmarks and lore come up 1.8× as often and secrets 1.5×. The fastest way to chart a region and the best Explorer XP while there is something left to chart
+- **🌑 Deep Wilds** — more treasure and secrets and +30% coins, but traps twice as often and 25% harder
+- A bare `/explore go` takes the route you used last; `/explore regions` lists what each one does
+- **🔥 Streaks** — every expedition that doesn't end in a trap or a lost encounter adds one, worth +2% coins each up to +20%. A trap or a lost encounter ends it, and so does 30 minutes away. The encounter prompt says when a loss would cost you your streak, so a long streak makes the Deep Wilds and a bold approach a real gamble. Your current and best streaks show on `/explore profile`
+- The staged "Setting out" beat plays when there is something to reveal (an encounter, a secret, a first visit, epic or legendary treasure); routine runs go straight to the result
+- A find leads with a picture card, the same one `/hunt start`, `/fish cast` and `/mine dig` draw: the recovered relic (or the region) in its tier's colour, the haul set against your best and the server record, the coins and XP, and a banner when the trip charts the whole region. Traps, quiet walks and lost encounters stay text-only
 
 **Progression:**
-- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one, shown as a live chance on the result embed. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one. Once a drought reaches 10 expeditions the result embed shows the live chance. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Anomalies** — once every landmark in a core region is charted, its discovery slot turns up repeatable anomalies instead, so a charted region still has something to find
 - **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
 - **Relic case** — each distinct relic is worth +1% on exploration coins, up to the width of your case. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates. The case starts at 10 of the 25 known relics and is widened by explorer prestige
-- **Encounters are a real bet** — the prompt quotes the win chance and both coin bands in the money *you* would see, and losing is priced off what was on the table rather than a flat fee, so the long-odds encounters with the biggest prizes are worth taking instead of worth dodging
+- **Encounters are a real decision** — the prompt quotes the win chance and both coin bands in the money *you* would see. Each core region has a steady encounter (66%), a lean one (60%), a coin flip (54%) and a long shot (50%). A loss costs half the encounter's average reward, so the first two are worth approaching and the last two are not, on the base numbers. Your standing bonuses lift the win and not the loss, the soft cap halves the win and not the loss, and **collecting a region's full lore adds +5%** to every approach there, so the right call depends on the creature and on you. A timeout resolves as keeping your distance, and the result says so
 - **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
 - **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
 - **Daily coin caps ramp** — the first 100,000 coins in a rolling 24h window pay in full, everything up to 150,000 pays at 50%, and past that expeditions still chart the map and pay Explorer XP but stop paying cash
@@ -853,8 +1088,8 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 P5. Each rank resets Explorer Level and XP and keeps everything else — charted
 regions, completed surveys, the relic case, the journal and every lifetime stat.
 An ascended explorer carries a prestige title rather than dropping back to
-"Doorstep Wanderer", but region unlocks are level-gated, so the deeper regions sit
-behind the ladder again until it is re-climbed:
+"Doorstep Wanderer". A region's level requirement gates opening its route, not
+walking it, so every route you have opened stays open through an ascension:
 
 | Rank | Grants (cumulative) |
 |---|---|
@@ -1035,7 +1270,7 @@ _Generated by `npm run docs:panels` from the dashboard sidebar and `src/dashboar
 | Section | What it configures |
 | --- | --- |
 | **Command Policies** | Restrict or allow commands by role, channel, or time of day |
-| **Ask Clawdia** | Configure Clawdia's chat, knowledge base, summaries, and per-channel personas for your server |
+| **Ask Clawdia** | Configure Clawdia's chat, what it can do, its knowledge base, and its summaries for your server |
 | **Temp Voice** | Members join a lobby channel and instantly get their own private voice channel |
 
 ### Feeds & Automation

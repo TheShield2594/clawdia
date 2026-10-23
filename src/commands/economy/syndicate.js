@@ -13,6 +13,8 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 const { crewSharePayoutKey, syndicateFoundRefundPayoutKey } = require('../../utils/payoutKey');
 const { buildSkillCheck } = require('../../services/heistService');
+const { replyBoard } = require('../../utils/leaderboardCard');
+const { buildSyndicateBoard } = require('../../utils/economyLeaderboards');
 const {
     activeSyndicateHeists,
     SYNDICATE_TARGETS,
@@ -318,13 +320,9 @@ async function handleSyndicateButton(interaction, client) {
         return;
     }
 
-    // syn_skill_{heistId}_{userId}_{answer}
+    // syn_skill_{heistId}_{userId}_{answer}; heistId (syn-guildId-ts) has no underscores
     if (id.startsWith('syn_skill_')) {
-        const afterPrefix = id.slice('syn_skill_'.length);
-        const parts = afterPrefix.split('_');
-        // parts[0] = heistId (syn-guildId-ts, no underscores)
-        // parts[1] = userId
-        // parts[2] = answer
+        const parts = id.slice('syn_skill_'.length).split('_');
         if (parts.length < 3) {
             return interaction.reply({ content: 'Malformed skill-check button.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
@@ -340,6 +338,9 @@ async function handleSyndicateButton(interaction, client) {
 
         if (!heist || !heist.players.has(userId)) {
             return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        if (interaction.user.id !== userId) { // only the player named in the id answers it (#1161)
+            return interaction.reply({ content: "This isn't your skill check.", flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const player = heist.players.get(userId);
@@ -678,30 +679,7 @@ async function executeInfo(interaction, guildDoc) {
 }
 
 async function executeLeaderboard(interaction, guildDoc) {
-    const currency = guildDoc?.economy?.currency ?? '💰';
-    const top = await Syndicate.find({ guildId: interaction.guild.id })
-        .sort({ lifetimeEarnings: -1 })
-        .limit(10)
-        .lean();
-
-    if (!top.length) {
-        return interaction.reply({ content: 'No syndicates have been founded on this server yet.', flags: MessageFlags.Ephemeral });
-    }
-
-    const medals = ['🥇', '🥈', '🥉'];
-    const lines = top.map((syn, i) => {
-        const rank = medals[i] ?? `${i + 1}.`;
-        const tag  = syn.tag ? ` [${syn.tag}]` : '';
-        return `${rank} **${syn.name}**${tag} — ${currency}${(syn.lifetimeEarnings || 0).toLocaleString()} · ${syn.memberIds.length} members · Heat ${syn.heat || 0}`;
-    });
-
-    const embed = new EmbedBuilder()
-        .setColor(COLORS.WARN)
-        .setTitle('🏆 Syndicate Leaderboard')
-        .setDescription(lines.join('\n'))
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return replyBoard(interaction, await buildSyndicateBoard(interaction, guildDoc));
 }
 
 async function executeHeist(interaction, guildDoc, client) {

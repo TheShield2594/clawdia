@@ -1,7 +1,7 @@
 const openai = require('./openai');
 const anthropic = require('./anthropic');
 const gemini = require('./gemini');
-const { decryptSecret } = require('../../../config/secretBox');
+const { resolveApiKey } = require('../apiKeys');
 
 // OpenRouter is OpenAI-compatible: same wire protocol, different base URL and
 // attribution headers.
@@ -69,7 +69,7 @@ module.exports = {
     // *routed* model supports tool calling is up to the model.
     mcp: 'client',
     supportsVision,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openrouterKey) || process.env.OPENROUTER_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'openrouterKey', envKey: process.env.OPENROUTER_API_KEY, guildId }),
     // OpenRouter model ids are namespaced; a bare model name is a config error
     // that would otherwise surface as an opaque 400 from the API.
     validateModel: model => (model && !model.includes('/'))

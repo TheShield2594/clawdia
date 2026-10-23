@@ -113,7 +113,10 @@ module.exports = {
             const epoch = Math.floor(remindAt.getTime() / 1000);
             const cadence = every ? ` (repeating **${every}**)` : '';
             const tzNote = !user?.timezone && at ? '\n_Tip: set `/timezone set` so absolute times use your local time instead of UTC._' : '';
-            await interaction.reply(`✅ I'll remind you about "${message}"${cadence} on <t:${epoch}:F> (<t:${epoch}:R>)${tzNote}`);
+            await interaction.reply({
+                content: `✅ I'll remind you about "${message}"${cadence} on <t:${epoch}:F> (<t:${epoch}:R>)${tzNote}`,
+                allowedMentions: { parse: [] }
+            });
         } catch (error) {
             console.error('Reminder error:', error);
             await interaction.reply({ content: 'Failed to create reminder.', flags: MessageFlags.Ephemeral });

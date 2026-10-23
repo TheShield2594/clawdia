@@ -8,7 +8,7 @@
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const { PRESTIGE_BADGES } = require('../../../data/exploreData');
 const { ensureExploreData, renderMap, getExplorerTitle } = require('../../../services/exploreService');
-const { loadReadContext, surveyedCount } = require('./shared');
+const { loadReadContext, surveyedCount, EXPLORE_COLORS } = require('./shared');
 
 async function handleMap(interaction) {
     const ctx = await loadReadContext(interaction);
@@ -29,7 +29,7 @@ async function handleMap(interaction) {
     const mapBadge = mapRank > 0 ? `${PRESTIGE_BADGES[Math.min(mapRank, PRESTIGE_BADGES.length - 1)]} P${mapRank} · ` : '';
 
     const embed = new EmbedBuilder()
-        .setColor('#2e7d32')
+        .setColor(EXPLORE_COLORS.TRAIL)
         .setTitle(`🗺️ The Explorer's Map — ${interaction.user.username}`)
         .setDescription(
             `*Every line on this map cost somebody shoe leather. These lines cost yours.*\n\n` +

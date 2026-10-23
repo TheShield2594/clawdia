@@ -13,7 +13,7 @@ const {
 const { relicItemId } = require('../../../data/activityItems');
 const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { fitDescription, EMBED_LIMITS } = require('../../../utils/embedFields');
-const { loadReadContext } = require('./shared');
+const { loadReadContext, EXPLORE_COLORS } = require('./shared');
 
 async function handleRelics(interaction) {
     const target = interaction.options.getUser('user') ?? interaction.user;
@@ -74,7 +74,7 @@ async function handleRelics(interaction) {
     const caseValue = collection.reduce((sum, r) => sum + r.value * r.quantity, 0);
 
     const embed = new EmbedBuilder()
-        .setColor('#c9a227')
+        .setColor(EXPLORE_COLORS.RELIC)
         .setTitle(`🏺 The Relic Case — ${target.username}`)
         .setThumbnail(target.displayAvatarURL({ dynamic: true }))
         .setDescription(caseNote ? `${caseText}\n\n${caseNote}` : caseText)
@@ -82,7 +82,7 @@ async function handleRelics(interaction) {
             {
                 name: '📚 The Collection',
                 value: `**${distinct}** distinct of **${RELIC_LIST.length}** known *(${TOTAL_CORE_RELICS} from the core regions, the rest only turn up in season)*\n`
-                     + `Case value: **${currency}${caseValue.toLocaleString()}**`,
+                     + `Trade value: **${currency}${caseValue.toLocaleString()}** *(what the set tends to fetch on the \`/market\`)*`,
                 inline: false,
             },
             ...(missingField ? [missingField] : []),
@@ -97,7 +97,7 @@ async function handleRelics(interaction) {
                 inline: false,
             },
         )
-        .setFooter({ text: 'Relics have no buyer — nothing out there is qualified. Trade them on the /market if someone disagrees.' })
+        .setFooter({ text: 'No shop buys relics — nothing out there is qualified. Their worth is what another player will pay on the /market.' })
         .setTimestamp();
 
     // The case wears its crown jewel — the rarest relic held — with the avatar

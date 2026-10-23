@@ -54,6 +54,13 @@ const client = new Client({
     // Member/user/ban caches are unbounded by default; see cacheOptions.js.
     makeCache,
     sweepers,
+
+    // Plenty of sends echo text a member or the model wrote (reminders, giveaway
+    // prizes, summaries). Without a default, discord.js parses @everyone, @here
+    // and role mentions in all of them. Only user mentions ping unless a send
+    // asks for more itself (ticket support roles, the slots jackpot @here, RSS
+    // role pings), so a new echo path fails safe (#1142).
+    allowedMentions: { parse: ['users'], repliedUser: false },
 });
 
 client.commands = new Collection();

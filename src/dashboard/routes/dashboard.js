@@ -38,6 +38,7 @@ async function getManageableGuilds(req) {
 }
 
 const { INVITE_PERMISSIONS_BITFIELD } = require('../../config/invitePermissions');
+const { IMAGE_SERVICE_ORDER, operatorImageModel } = require('../../config/aiImages');
 
 function buildInviteUrl(guildId) {
     const clientId = process.env.CLIENT_ID;
@@ -233,7 +234,9 @@ async function buildGuildSettingsLocals(req) {
             huntItems,
             fishItems,
             mineItems,
-            explorationRegions
+            explorationRegions,
+            // What an empty image-model field on the AI panel falls back to.
+            defaultImageModels: Object.fromEntries(IMAGE_SERVICE_ORDER.map(service => [service, operatorImageModel(service)]))
         }
     };
 }

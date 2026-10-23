@@ -138,7 +138,7 @@ describe('lazily loaded settings panels', () => {
     });
 
     it('opens the panel named by the URL hash, and its inner tab', async () => {
-        window.location.hash = '#aipersonas';
+        window.location.hash = '#aiimages';
         try {
             bootPage();
             await settle();
@@ -146,7 +146,7 @@ describe('lazily loaded settings panels', () => {
             const ai = document.getElementById('ai');
             expect(ai).not.toBeNull();
             expect(ai.style.display).toBe('block');
-            expect(document.getElementById('ai-personas').classList.contains('active')).toBe(true);
+            expect(document.getElementById('ai-images').classList.contains('active')).toBe(true);
             // The AI panel's own hooks ran: the prompt counter is filled in.
             expect(document.getElementById('ai-prompt-count').textContent).toMatch(/\d+ \/ \d+/);
         } finally {

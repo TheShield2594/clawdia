@@ -22,9 +22,21 @@ const petFields = () => ({
     starving:           { type: Boolean, default: false },
     starvingStartAt:    { type: Date,    default: null },
     lastPlay:           { type: Date,    default: null },
-    restUntil:          { type: Date,    default: null },
+    // Training (#1182, which replaced Rest and its restUntil): sessions put
+    // into each focus, 0–10, and when the last one ran, for the cooldown.
+    training: {
+        power:   { type: Number, default: 0, min: 0, max: 10 },
+        guard:   { type: Number, default: 0, min: 0, max: 10 },
+        agility: { type: Number, default: 0, min: 0, max: 10 },
+    },
+    lastTrain:          { type: Date,    default: null },
     potw:               { type: Boolean, default: false },
     weeklyInteractions: { type: Number,  default: 0    },
+    // Daily cap on Pet of the Week credit: the UTC day index the counter below
+    // belongs to, and how many interactions have counted on that day.
+    interactionDay:     { type: Number,  default: null },
+    interactionsToday:  { type: Number,  default: 0    },
+    lastShowcase:       { type: Date,    default: null },
     personality:        { type: String,  default: null },
     // Progression (Phase 4): pets gain XP from feeding and battles, level up,
     // and evolve through stages that scale their passive bonus.
@@ -33,7 +45,28 @@ const petFields = () => ({
     evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
     battleWins:         { type: Number,  default: 0 },
     battleLosses:       { type: Number,  default: 0 },
+    // Member-vs-member results only. battleWins/battleLosses also count wild
+    // fights, so ranking on them measured time spent grinding, not skill.
+    pvpWins:            { type: Number,  default: 0 },
+    pvpLosses:          { type: Number,  default: 0 },
     lastBattle:         { type: Date,    default: null },
+    // Bond (#1186): 0–100, raised by care and lowered by neglect — see the Bond
+    // section of services/petService.js. bondDay/bondToday are its daily cap,
+    // shaped like interactionDay/interactionsToday above.
+    bond:               { type: Number,  default: 0, min: 0, max: 100 },
+    bondDay:            { type: Number,  default: null },
+    bondToday:          { type: Number,  default: 0    },
+    // Vacation (#1181): the window this pet's hunger is paused for — see the
+    // Vacation section of services/petService.js.
+    vacationFrom:       { type: Date,    default: null },
+    vacationUntil:      { type: Date,    default: null },
+    // Hunger warning DMs (#1181), one per crossing: below the passive
+    // threshold, and empty. Cleared when the pet is fed back above each.
+    hungerWarnedLow:    { type: Boolean, default: false },
+    hungerWarnedEmpty:  { type: Boolean, default: false },
+    // The pet ladder's season title (#1185), e.g. "S2 Ladder Champion", set
+    // on the top three pets when a season ends and shown on the companion card.
+    ladderTitle:        { type: String,  default: null },
 });
 
 const userSchema = new Schema({
@@ -114,6 +147,13 @@ const userSchema = new Schema({
     crimeRecord: {
         totalCrimes:      { type: Number, default: 0 },
         successfulCrimes: { type: Number, default: 0 },
+    },
+    // /crime's standing heat: loud jobs raise it, careful ones lower it, and it
+    // cools one level per CRIME_HEAT_DECAY_MS on its own. `level` is as of
+    // `updatedAt`; readers apply the decay since then (see crime.js heatNow).
+    crimeHeat: {
+        level:     { type: Number, default: 0, min: 0, max: 5 },
+        updatedAt: { type: Date, default: null },
     },
     shiftsWorked: { type: Number, default: 0 },
 
@@ -248,6 +288,9 @@ const userSchema = new Schema({
         leaderboard: {
             overtaken: { type: Boolean, default: true },  // DM when someone passes you
             climbed:   { type: Boolean, default: false }  // DM when you hit a major rank threshold
+        },
+        pets: {
+            hunger: { type: Boolean, default: true }  // DM when a pet's passive switches off, and when it is about to run away
         }
     },
 
@@ -270,6 +313,8 @@ const userSchema = new Schema({
     // Extra pet slots bought with the Pet Slot Expansion item (capped in petService).
     petSlots: { type: Number, default: 0, min: 0 },
     pets: [petFields()],
+    // Every species this player has ever owned, for /pet codex (#1187).
+    petCodex: { type: [String], default: [] },
 
     // Pets lost to starvation, most recent first. Retained so a Revive Scroll
     // can restore one with its level, bond and battle record intact; capped at
@@ -307,7 +352,16 @@ const userSchema = new Schema({
     pinnedAchievement: { type: String,  default: null },
 
     casinoStats: {
-        slotsLossStreak: { type: Number, default: 0 },
+        // Slots' Heat meter: paid spins since the last Hot Spin. It replaced the
+        // loss streak (`slotsLossStreak`, now unread) that fed the Hot Reel.
+        slotsHeat: { type: Number, default: 0 },
+        // /casino blackjack's record, shown in its footer. A streak counts
+        // consecutive rounds that came out ahead; a push leaves it alone.
+        bjHands:      { type: Number, default: 0 },
+        bjWins:       { type: Number, default: 0 },
+        bjBlackjacks: { type: Number, default: 0 },
+        bjStreak:     { type: Number, default: 0 },
+        bjBestStreak: { type: Number, default: 0 },
     },
 
     grandPrestige: {

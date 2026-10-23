@@ -175,10 +175,16 @@ function renderMcpRoute(provider) {
 
     const base = hint.dataset.base || hint.textContent;
     hint.dataset.base = base;
-    hint.textContent = select.value === 'auto' && _mcpEffectiveRoute
-        ? base + ' Right now automatic resolves to ' +
-            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.")
-        : base;
+    if (select.value === 'auto' && _mcpEffectiveRoute) {
+        hint.textContent = base + ' Right now automatic resolves to ' +
+            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.");
+    } else if (select.value === 'connector' && _mcpEffectiveRoute === 'client') {
+        // Approvals (or an OAuth connection) override the connector (#1149):
+        // say so, rather than letting the admin believe the connector is in use.
+        hint.textContent = base + " Right now requests use Clawdia's own client anyway: an approval policy or an OAuth connection is set, and neither can work through Anthropic's connector.";
+    } else {
+        hint.textContent = base;
+    }
 }
 
 function renderMcpServers(provider) {
@@ -208,7 +214,11 @@ function renderMcpServers(provider) {
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
             if ((srv.confirmTools || []).length) bits.push(srv.confirmTools.length + ' need approval');
+            if ((srv.unattendedTools || []).length) bits.push(srv.unattendedTools.length + ' run in scheduled tasks');
             if (srv.resources) bits.push('📚 documents in context');
+            // An OAuth connection is somebody's own account, and managers-only
+            // whatever the switch says (forMember in config/mcpServers.js).
+            if (srv.managersOnly || srv.oauth) bits.push('🔒 managers only');
             const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML =
@@ -271,12 +281,13 @@ function splitToolNames(value) {
 
 function resetMcpForm() {
     _mcpEditing = null;
-    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-confirm-tools'].forEach(function(id) {
+    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-confirm-tools', 'mcp-unattended-tools'].forEach(function(id) {
         if (mcpEl(id)) mcpEl(id).value = '';
     });
     mcpEl('mcp-preset').value = '';
     mcpEl('mcp-enabled').checked = true;
     if (mcpEl('mcp-resources')) mcpEl('mcp-resources').checked = false;
+    if (mcpEl('mcp-managers-only')) mcpEl('mcp-managers-only').checked = false;
     mcpEl('mcp-form-title').textContent = 'Add a connection';
     mcpEl('mcp-save-btn').textContent = 'Add connection';
     mcpEl('mcp-cancel-btn').style.display = 'none';
@@ -298,8 +309,10 @@ function editMcpServer(name) {
     mcpEl('mcp-allowed').value = srv.allowedTools.join(', ');
     mcpEl('mcp-blocked').value = srv.blockedTools.join(', ');
     mcpEl('mcp-confirm-tools').value = (srv.confirmTools || []).join(', ');
+    if (mcpEl('mcp-unattended-tools')) mcpEl('mcp-unattended-tools').value = (srv.unattendedTools || []).join(', ');
     mcpEl('mcp-enabled').checked = srv.enabled;
     if (mcpEl('mcp-resources')) mcpEl('mcp-resources').checked = Boolean(srv.resources);
+    if (mcpEl('mcp-managers-only')) mcpEl('mcp-managers-only').checked = Boolean(srv.managersOnly);
     mcpEl('mcp-form-title').textContent = 'Edit ' + srv.name;
     mcpEl('mcp-save-btn').textContent = 'Save changes';
     mcpEl('mcp-cancel-btn').style.display = '';
@@ -319,7 +332,9 @@ async function saveMcpServer() {
         allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
         blockedTools: splitToolNames(mcpEl('mcp-blocked').value),
         confirmTools: splitToolNames(mcpEl('mcp-confirm-tools').value),
-        resources: Boolean(mcpEl('mcp-resources') && mcpEl('mcp-resources').checked)
+        unattendedTools: mcpEl('mcp-unattended-tools') ? splitToolNames(mcpEl('mcp-unattended-tools').value) : [],
+        resources: Boolean(mcpEl('mcp-resources') && mcpEl('mcp-resources').checked),
+        managersOnly: Boolean(mcpEl('mcp-managers-only') && mcpEl('mcp-managers-only').checked)
     };
     // Only send the token when one was typed — an absent field means
     // "keep whatever is stored", which is how editing without

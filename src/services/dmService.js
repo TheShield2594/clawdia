@@ -94,7 +94,7 @@ async function getActiveSession(guildId, channelId) {
  */
 async function dmProviderConfig(guildId) {
     const gs = await Guild.findOne({ guildId });
-    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(gs?.ai || {});
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(gs?.ai || {}, { guildId });
     if (provider !== 'ollama' && !apiKey) {
         return { error: 'AI is not configured for this server. An admin must add an API key.' };
     }
@@ -512,7 +512,10 @@ async function resolveTurn(interaction, sessionId, actionText) {
         return interaction.editReply('The adventure has not begun yet. The host must use `/dm begin`.');
     }
     if (player.hp <= 0) {
-        return interaction.editReply(`**${player.name}** has fallen and cannot act. The rest of the party fights on.`);
+        return interaction.editReply({
+            content: `**${player.name}** has fallen and cannot act. The rest of the party fights on.`,
+            allowedMentions: { parse: [] }
+        });
     }
 
     // Roles are counted back from the end of the log, never forward from its

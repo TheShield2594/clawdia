@@ -21,6 +21,7 @@ const {
     executeExplore,
     resolveEncounter,
     encounterLossBand,
+    getEncounterWinChance,
     getEncounterStakes,
     addJournalEntry,
     regionCompletion,
@@ -37,6 +38,7 @@ const {
     RELIC_RARITY_ORDER,
     TOTAL_CORE_SECRETS,
     EXPLORER_LEVELS,
+    ROUTES,
     getRelicMeta,
 } = require('../src/data/exploreData');
 
@@ -443,12 +445,22 @@ describe('active region fallback', () => {
         expect(resolveActiveRegion(user, makeGuildSettings()).region.id).toBe('crystal_caves');
     });
 
-    test('an unlocked region below its level requirement is not a fallback', () => {
+    test('a route once opened stays open below its level requirement', () => {
+        // Only prestige puts an explorer below a route they opened. The level
+        // gates opening the route, not walking it — re-locking it made
+        // ascending cost hundreds of expeditions of income for a small bonus.
         const user = makeUser();
-        user.exploration.level = 4;
+        user.exploration.level = 1;
         user.exploration.unlockedRegions.push('crumbling_ruins');
         user.exploration.activeRegion = 'frostveil_pass';
-        expect(resolveActiveRegion(user, makeGuildSettings()).region.id).toBe('whispering_forest');
+        expect(getAvailableRegions(user, makeGuildSettings()).map(r => r.id)).toContain('crumbling_ruins');
+        expect(resolveActiveRegion(user, makeGuildSettings()).region.id).toBe('crumbling_ruins');
+    });
+
+    test('a region never opened is still not available, whatever the level', () => {
+        const user = makeUser();
+        user.exploration.level = 30;
+        expect(getAvailableRegions(user, makeGuildSettings()).map(r => r.id)).not.toContain('crumbling_ruins');
     });
 });
 
@@ -609,15 +621,16 @@ describe('secret pity tells the truth', () => {
         user.exploration.stamina = LIMITS.MAX_STAMINA;
         user.exploration.sinceSecret = 7;
 
-        // 0.92 is chosen to land in the secret slot of the region's event
-        // table, so this expedition finds one rather than hoping a roll does.
+        // 0.875 is chosen to land in the secret slot of the region's event
+        // table as the default route (the Main Trail) reshapes it, so this
+        // expedition finds one rather than hoping a roll does.
         // The type assertion below is what keeps that honest: reorder or
         // reweight the table and it fails, instead of the test quietly
         // covering nothing. The twenty-expedition sweep below cannot stand in
         // for this — delete the reset and it still passes whenever those
         // twenty happen to turn up no secret at all.
-        const roll = jest.spyOn(Math, 'random').mockReturnValue(0.92);
-        __setRandomSourceForTests(() => 0.92);
+        const roll = jest.spyOn(Math, 'random').mockReturnValue(0.875);
+        __setRandomSourceForTests(() => 0.875);
         try {
             const result = executeExplore(user, region, settings, {});
             expect(result.type).toBe('secret');
@@ -711,14 +724,13 @@ describe('exhausted slots still pay properly', () => {
     test('a fallback treasure caps at rare but keeps its relic roll', () => {
         const user = makeUser();
         const region = REGIONS.whispering_forest;
-        const progress = chartRegion(user, region, { secrets: false });
-        progress.landmarksFound = region.landmarks.map(l => l.id);
+        chartRegion(user, region, { secrets: false });
 
-        // event roll → discovery · intro · tier roll (legendary) · line · amount
-        // · relic check · relic pick
+        // event roll → lore (exhausted) · intro · tier roll (legendary) · line
+        // · amount · relic check · relic pick
         const result = withRandom(
             () => executeExplore(user, region, makeGuildSettings(), {}),
-            scriptRandom([0.3, 0.5, 0.99, 0.5, 0.5, 0, 0]),
+            scriptRandom([0.8, 0.5, 0.99, 0.5, 0.5, 0, 0]),
         );
 
         expect(result.type).toBe('treasure');
@@ -739,6 +751,65 @@ describe('exhausted slots still pay properly', () => {
         expect(result.type).toBe('treasure');
         expect(result.fallbackTreasure).toBe(false);
         expect(result.treasureTier.tier).toBe('legendary');
+    });
+});
+
+describe('anomalies', () => {
+    test('a charted region\'s discovery slot turns up a repeatable anomaly', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        chartRegion(user, region, { secrets: false });
+        const landmarksBefore = user.exploration.landmarksDiscovered;
+
+        // 0.3 lands the event roll on the discovery slot
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            () => 0.3,
+        );
+        expect(result.type).toBe('discovery');
+        expect(result.anomaly).toBeDefined();
+        expect(region.anomalies).toContain(result.anomaly);
+        expect(result.landmark).toBeUndefined();
+        expect(result.payout).toBeGreaterThan(0);
+        expect(result.xp).toBeGreaterThan(0);
+        expect(user.exploration.anomaliesFound).toBe(1);
+        // Repeatable: it charts nothing, so the landmark tally is untouched.
+        expect(user.exploration.landmarksDiscovered).toBe(landmarksBefore);
+    });
+
+    test('an uncharted region still charts landmarks rather than anomalies', () => {
+        const user = makeUser();
+        const result = withRandom(
+            () => executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {}),
+            () => 0.3,
+        );
+        expect(result.landmark).toBeDefined();
+        expect(result.anomaly).toBeUndefined();
+    });
+
+    test('a region written without anomalies falls back to treasure', () => {
+        const user = makeUser();
+        const region = REGIONS.frostveil_pass;
+        expect(region.anomalies).toBeUndefined();
+        chartRegion(user, region, { secrets: false });
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            () => 0.3,
+        );
+        expect(result.type).toBe('treasure');
+        expect(result.fallbackTreasure).toBe(true);
+    });
+
+    test('every core region has anomalies, and every anomaly is complete', () => {
+        for (const region of REGION_LIST.filter(r => !r.seasonalEventId)) {
+            expect(region.anomalies?.length).toBeGreaterThan(0);
+            for (const a of region.anomalies) {
+                expect(a.id).toBeTruthy();
+                expect(a.name).toBeTruthy();
+                expect(a.emoji).toBeTruthy();
+                expect(a.line).toBeTruthy();
+            }
+        }
     });
 });
 
@@ -989,44 +1060,105 @@ describe('the daily cap ramps down instead of falling off', () => {
     });
 });
 
-describe('approaching an encounter is a bet worth taking', () => {
+describe('the encounter choice is a real decision', () => {
     // The choice offered by /explore go is the only interactive decision in the
-    // game. It is only a decision if bold actually pays better than careful —
-    // otherwise the prompt is asking players to volunteer for a worse outcome.
+    // game. It used to have one right answer — approaching paid about 1.5× the
+    // expected coins of keeping your distance on every encounter, and more XP
+    // — so the prompt was a pause before the same click. It is a decision only
+    // if the answer depends on the creature and on the player.
     const safeRate = LIMITS.ENCOUNTER_SAFE_RATE;
 
-    function expectedValues(region, enc) {
+    function expectedValues(region, enc, winChance = enc.winChance) {
         const avgReward = (enc.reward.min + enc.reward.max) / 2;
         const band = encounterLossBand(enc);
         const avgLoss = (band.min + band.max) / 2;
         const m = region.payoutMultiplier;
         return {
-            approach: enc.winChance * avgReward * m - (1 - enc.winChance) * avgLoss * m,
+            approach: winChance * avgReward * m - (1 - winChance) * avgLoss * m,
             observe:  avgReward * m * safeRate,
         };
     }
 
-    test('every encounter in the game pays better for approaching', () => {
-        const losers = [];
-        for (const region of REGION_LIST) {
-            for (const enc of region.encounters) {
+    test('every core region has an encounter worth approaching and one worth watching', () => {
+        for (const region of REGION_LIST.filter(r => !r.seasonalEventId)) {
+            const verdicts = region.encounters.map(enc => {
                 const { approach, observe } = expectedValues(region, enc);
-                if (approach <= observe) losers.push(`${region.name} / ${enc.name}`);
-            }
+                return approach > observe ? 'approach' : 'observe';
+            });
+            expect(verdicts).toContain('approach');
+            expect(verdicts).toContain('observe');
         }
-        expect(losers).toEqual([]);
     });
 
-    test('the margin is real but not a formality', () => {
+    test('neither option is ever a formality', () => {
         for (const region of REGION_LIST) {
             for (const enc of region.encounters) {
                 const { approach, observe } = expectedValues(region, enc);
                 const ratio = approach / observe;
-                // Worth taking, without making "keep your distance" pointless.
-                expect(ratio).toBeGreaterThan(1.2);
-                expect(ratio).toBeLessThan(2);
+                // Never so good that watching is pointless, never so bad that
+                // approaching is a donation.
+                expect(ratio).toBeGreaterThan(0.5);
+                expect(ratio).toBeLessThan(1.6);
             }
         }
+    });
+
+    test('knowing a region\'s lore can turn a close call into a bet worth taking', () => {
+        const region = REGIONS.whispering_forest;
+        const coinFlip = region.encounters.find(enc => {
+            const { approach, observe } = expectedValues(region, enc);
+            return approach < observe
+                && expectedValues(region, enc, enc.winChance + LIMITS.ENCOUNTER_LORE_BONUS).approach > observe;
+        });
+        expect(coinFlip).toBeDefined();
+    });
+
+    test('the lore bonus applies once every fragment is collected, and not before', () => {
+        const region = REGIONS.whispering_forest;
+        const enc = region.encounters[0];
+        const user = makeUser();
+        const progress = chartRegion(user, region, { landmarks: false, lore: false, secrets: false });
+        expect(getEncounterWinChance(user, region, enc)).toEqual({ chance: enc.winChance, loreBonus: false });
+
+        progress.loreFound = region.lore.slice(1).map(l => l.id);
+        expect(getEncounterWinChance(user, region, enc).loreBonus).toBe(false);
+
+        progress.loreFound = region.lore.map(l => l.id);
+        const known = getEncounterWinChance(user, region, enc);
+        expect(known.loreBonus).toBe(true);
+        expect(known.chance).toBeCloseTo(enc.winChance + LIMITS.ENCOUNTER_LORE_BONUS);
+    });
+
+    test('the prompt quotes the lore-adjusted odds the roll uses', () => {
+        const region = REGIONS.whispering_forest;
+        const user = makeUser();
+        chartRegion(user, region, { landmarks: false, secrets: false });
+        const enc = region.encounters[0];
+        const stakes = getEncounterStakes(user, region, makeGuildSettings(), { encounter: enc, coinMultiplier: 1 });
+        expect(stakes.loreBonus).toBe(true);
+        expect(stakes.winChance).toBeCloseTo(enc.winChance + LIMITS.ENCOUNTER_LORE_BONUS);
+    });
+
+    test('collecting the last fragment says so on the result', () => {
+        const region = REGIONS.whispering_forest;
+        const user = makeUser();
+        const progress = chartRegion(user, region, { landmarks: false, secrets: false });
+        progress.loreFound = region.lore.slice(1).map(l => l.id);
+        // 0.8 lands the event roll on the lore slot
+        const result = withRandom(() => executeExplore(user, region, makeGuildSettings(), {}), () => 0.8);
+        expect(result.type).toBe('lore');
+        expect(result.loreCompleted).toBe(true);
+    });
+
+    test('a timeout resolves as keeping your distance, and says it was a timeout', () => {
+        const region = REGIONS.whispering_forest;
+        const user = makeUser();
+        const pending = { encounter: region.encounters[0], coinMultiplier: 1, pendingChoice: true, secretsLeft: true };
+        const timedOut = resolveEncounter(user, region, makeGuildSettings(), { ...pending }, null);
+        expect(timedOut.outcome).toBe('safe');
+        expect(timedOut.hesitated).toBe(true);
+        const chosen = resolveEncounter(user, region, makeGuildSettings(), { ...pending }, 'observe');
+        expect(chosen.hesitated).toBe(false);
     });
 
     test('losing is priced off what was on the table, not a flat fee', () => {
@@ -1152,6 +1284,8 @@ describe('approaching an encounter is a bet worth taking', () => {
                 if (r.pendingChoice) {
                     user.inventory = relics.map(relic => ({ itemId: relic.itemId, quantity: 1 }));
                     user.exploration.regions = [];
+                    // The walk built a streak too, which lifts coins the same way.
+                    user.exploration.streak = 0;
                     return r;
                 }
             }
@@ -1162,8 +1296,10 @@ describe('approaching an encounter is a bet worth taking', () => {
         const plainStakes = getEncounterStakes(plain, region, settings, plainResult);
         expect(plainStakes.winChance).toBe(plainResult.encounter.winChance);
         expect(plainStakes.win.min).toBeGreaterThan(plainStakes.safe.min);
+        // The route the walk took prices the prize too (the default trail pays less).
+        const routeMult = 1 + ROUTES[plainResult.route].payoutBonus;
         expect(plainStakes.safe.min).toBe(
-            Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * safeRate));
+            Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * routeMult * safeRate));
 
         // Same encounter definition, richer explorer → a bigger quoted prize.
         const richResult = encounterFor(collector, RELIC_LIST.slice(0, 8));

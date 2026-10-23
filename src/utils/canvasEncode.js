@@ -17,7 +17,7 @@
 
 /**
  * @param {import('canvas').Canvas} canvas
- * @param {string} [mimeType] anything node-canvas encodes; only PNG is used here.
+ * @param {string} [mimeType] anything node-canvas encodes: PNG, or JPEG where the image is photographic enough that PNG runs large.
  * @returns {Promise<Buffer>}
  */
 function encodeCanvas(canvas, mimeType = 'image/png') {

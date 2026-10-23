@@ -9,8 +9,10 @@ const {
     announceTournamentEnd,
     buildWinnersEmbed,
     buildLeaderboardEmbed,
+    getSortedEntries,
     startTournament
 } = require('../../../services/tournamentService');
+const { sendBoard, avatarUrlOf, displayNameOf } = require('../../../utils/leaderboardCard');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const COLORS = require('../../../utils/embedColors');
@@ -49,7 +51,27 @@ async function handleTournamentStatus(interaction) {
         return interaction.editReply({ embeds: [buildWinnersEmbed(ended, currency)] });
     }
 
-    return interaction.editReply({ embeds: [buildLeaderboardEmbed(tournament)] });
+    const embed = buildLeaderboardEmbed(tournament);
+    const top = getSortedEntries(tournament).slice(0, 10);
+    if (top.length === 0) return interaction.editReply({ embeds: [embed] });
+
+    // The picture card: each angler with the catch that scored them.
+    const anglers = await Promise.all(top.map(e => interaction.client.users.fetch(e.userId).catch(() => null)));
+    return sendBoard(interaction, embed, {
+        theme: 'fish',
+        kicker: interaction.guild.name,
+        title: 'Fishing Tournament',
+        subtitle: 'Live standings by catch score',
+        entries: top.map((e, i) => ({
+            rank: i + 1,
+            name: displayNameOf(anglers[i]) ?? 'Unknown angler',
+            avatarUrl: avatarUrlOf(anglers[i]),
+            value: `${(e.score ?? 0).toLocaleString('en-US')} pts`,
+            detail: `${e.fishName}${e.isBossKill ? ' · boss kill' : ''}`,
+            score: e.score ?? 0,
+            you: e.userId === interaction.user.id,
+        })),
+    });
 }
 
 async function handleTournamentStart(interaction) {

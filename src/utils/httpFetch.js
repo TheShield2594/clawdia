@@ -87,8 +87,12 @@ async function request(url, init = {}) {
  * admin through the MCP error path and "timeout of 15000ms exceeded" is what
  * the existing messages are written against.
  *
+ * A caller's own `signal` is honoured alongside the timer rather than in place
+ * of it: whichever fires first cancels the request, and because the caller's
+ * one is not cleared with the timer it goes on bounding the body as well.
+ *
  * @param {string} url
- * @param {object} init `fetch` init plus `timeout`, minus `signal` — this owns that
+ * @param {object} init `fetch` init plus `timeout`, and optionally `signal`
  * @returns {Promise<Response>}
  */
 async function fetchHeaders(url, init) {
@@ -99,8 +103,9 @@ async function fetchHeaders(url, init) {
         timeout,
     );
     timer.unref?.();
+    const signal = init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal;
     try {
-        return await request(url, { ...init, signal: controller.signal });
+        return await request(url, { ...init, signal });
     } finally {
         clearTimeout(timer);
     }

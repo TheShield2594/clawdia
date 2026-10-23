@@ -48,12 +48,15 @@ const DEFAULTS = {
  * @param {string} [opts.subcommand]  what getSubcommand() returns
  * @param {object} [opts.user]        overrides for interaction.user
  * @param {Array}  [opts.components]  button presses to hand back, in order; each
- *                 may carry `updateRejects: true` to make its own `update` fail
+ *                 may carry `updateRejects: true` to make its own `update` fail,
+ *                 or `deferRejects: true` to make its `deferUpdate` fail
  *                                    is `{ customId, user? }` and becomes a
  *                                    component interaction. Once the queue is
  *                                    empty the window closes, as it does live.
  * @param {Map}    [opts.channels]    guild channels by id, for a command that
  *                                    announces somewhere other than in place
+ * @param {Map}    [opts.roles]       guild roles by id, for a command that
+ *                                    checks a role's permissions before granting it
  */
 function makeInteraction({
     options = {},
@@ -62,6 +65,7 @@ function makeInteraction({
     components = [],
     holdCollectors = false,
     channels = new Map(),
+    roles = new Map(),
     guildId = DEFAULTS.guildId,
     userId = DEFAULTS.userId,
 } = {}) {
@@ -89,6 +93,8 @@ function makeInteraction({
         });
         return {
         customId: press.customId,
+        // A select menu's chosen values, for a press on one.
+        values: press.values ?? [],
         user: { id: press.user ?? userId },
         showModal: jest.fn(modal => { shown = modal; return Promise.resolve(); }),
         awaitModalSubmit: jest.fn(async (opts = {}) => {
@@ -96,7 +102,12 @@ function makeInteraction({
             if (!press.modal || !accepts(opts.filter, entered)) throw new Error('Collector received no interactions before ending with reason: time');
             return entered;
         }),
-        deferUpdate: jest.fn().mockResolvedValue(undefined),
+        // `deferRejects` is an acknowledgement that missed Discord's 3-second
+        // window — the press was still made, and the command has to keep it.
+        deferUpdate: press.deferRejects
+            ? jest.fn(() => Promise.reject(new Error('Unknown interaction')))
+            : jest.fn().mockResolvedValue(undefined),
+        deferReply: jest.fn(record),
         // `updateRejects` makes this press's render fail, which is how a test
         // reaches the catch that runs *after* a hand has already been settled.
         update: press.updateRejects
@@ -105,6 +116,8 @@ function makeInteraction({
         reply: jest.fn(record),
         editReply: jest.fn(record),
         followUp: jest.fn(record),
+        // After deferUpdate, the press's reply is the message its button is on.
+        fetchReply: jest.fn(() => Promise.resolve(message)),
         message: { edit: jest.fn(record) },
         };
     };
@@ -214,6 +227,7 @@ function makeInteraction({
             id: guildId,
             name: 'Guild',
             channels: { cache: { get: id => channels.get(id) ?? null } },
+            roles: { cache: roles },
             members: { cache: new Map(), fetch: jest.fn().mockResolvedValue(null) },
         },
         channel: {

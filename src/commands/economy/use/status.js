@@ -135,7 +135,7 @@ function useStatus(itemId, user, { shopItems = [], hasRole = () => false, tiers 
         }
         case 'revive_scroll': {
             const fallen = user?.deceasedPets?.[0];
-            if (!fallen) return { usable: true, ready: false, status: 'no fallen pet to revive' };
+            if (!fallen) return { usable: true, ready: false, status: 'no runaway pet to call back' };
             const def = PET_DEFINITIONS[fallen.petId];
             const name = fallen.name || def?.name || fallen.petId;
             // The two refusals revive.js makes past "nobody to revive".

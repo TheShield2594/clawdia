@@ -4,7 +4,7 @@ const { timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = requir
 const COLORS = require('../../utils/embedColors');
 
 const BOOST_LABELS = {
-    coin: { emoji: '💰', label: 'Coin Boost', description: 'Increases coin earnings from work, daily, and games' },
+    coin: { emoji: '💰', label: 'Coin Boost', description: 'Increases coin earnings from work, daily, and games (not the casino)' },
     xp:   { emoji: '⭐', label: 'XP Boost',   description: 'Increases XP gained from messages'                 },
 };
 
@@ -21,7 +21,7 @@ module.exports = {
                         .setDescription('Type of boost to activate')
                         .setRequired(true)
                         .addChoices(
-                            { name: '💰 Coin Boost — multiplies all coin earnings', value: 'coin' },
+                            { name: '💰 Coin Boost — multiplies coin earnings (not the casino)', value: 'coin' },
                             { name: '⭐ XP Boost — multiplies XP from messages',    value: 'xp'   }
                         ))
                 .addIntegerOption(o =>

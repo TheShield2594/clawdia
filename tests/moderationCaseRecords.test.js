@@ -186,7 +186,7 @@ describe('case lookup and mutation', () => {
 describe('logModeration — the automod path into all of it', () => {
     const botUser = (channel = null) => ({
         id: 'bot1', username: 'Clawdia',
-        client: { channels: { cache: new Map(channel ? [['log1', channel]] : []) } },
+        client: { channels: { cache: new Map(channel ? [['log1', { guildId: 'g1', ...channel }]] : []) } },
     });
 
     test('files a case even when the guild has no log channel', async () => {

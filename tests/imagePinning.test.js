@@ -12,6 +12,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
 
 const ROOT = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -95,11 +96,19 @@ describe('the two stack files agree on the images they share', () => {
 });
 
 describe('Dependabot', () => {
-    const dependabot = read('.github/dependabot.yml');
+    const { updates } = yaml.load(read('.github/dependabot.yml'));
+    const watched = ecosystem => updates.find(u => u['package-ecosystem'] === ecosystem && u.directory === '/');
 
-    it('watches the docker ecosystem, so the pins do not rot', () => {
+    it('watches the docker ecosystem, so the Dockerfile pins do not rot', () => {
         // A digest that nothing bumps is a security problem of its own: the
         // build stops picking up base-image CVE fixes entirely.
-        expect(dependabot).toMatch(/package-ecosystem:\s*docker/);
+        expect(watched('docker')).toBeDefined();
+    });
+
+    it('watches the docker-compose ecosystem, so the stack image pins do not rot (#1160)', () => {
+        // `docker` covers the Dockerfile only; mongo, rsshub and autoheal live
+        // in docker-compose.yml. portainer-stack.yml is kept in step by the
+        // parity check above.
+        expect(watched('docker-compose')).toBeDefined();
     });
 });

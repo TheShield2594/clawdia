@@ -29,8 +29,10 @@ BACKUP_DIR="${1:-./backups}"
 # Load .env if present and BACKUP_REMOTE is not already set, the same way
 # backup.sh and verify-backup.sh pick up MONGODB_URI.
 if [ -z "${BACKUP_REMOTE:-}" ] && [ -f "$(dirname "$0")/../.env" ]; then
-    # shellcheck disable=SC1090
-    set -a; source "$(dirname "$0")/../.env"; set +a
+    # Parsed as data, never run as shell (#1161) — see scripts/lib/dotenv.sh.
+    # shellcheck source=scripts/lib/dotenv.sh
+    . "$(dirname "$0")/lib/dotenv.sh"
+    load_dotenv "$(dirname "$0")/../.env"
 fi
 
 # The same sink and the same rules as scripts/verify-backup.sh: https anywhere,
@@ -98,10 +100,11 @@ fi
 # BACKUP_ENCRYPTION_PASSPHRASE is set (#886), and `.enc` is how one says so.
 #
 # Skipped rather than refused, because "some of these are plaintext" is the
-# ordinary state of a directory that has encryption on: the bot's own
-# pre-migration dump is written by src/migrations/runner.js, which has no
-# passphrase, so one turns up after every irreversible migration and stays for
-# the retention window. Refusing the whole run over it would take the off-site
+# ordinary state of a directory that has encryption on: an older bot, or one
+# not handed BACKUP_ENCRYPTION_PASSPHRASE, writes its pre-migration dump in the
+# clear (src/migrations/runner.js seals it when it has the passphrase, #1150),
+# so one can turn up after an irreversible migration and stay for the
+# retention window. Refusing the whole run over it would take the off-site
 # copy away for a month, and it is the sealed nightly archives that the copy is
 # for. What is refused is a run that would copy nothing at all — that is an
 # install with no passphrase, and it should hear about it rather than succeed
@@ -117,11 +120,15 @@ count_matching() {
 SEALED=$(count_matching 'clawdia-*.gz.enc')
 PLAINTEXT=$(( $(count_matching 'clawdia-*.gz') + $(count_matching 'pre-migration-*.gz') ))
 
+# Each sealed archive travels with its `.tag` (#1161): restore.sh refuses a
+# sealed archive without one, so an off-site copy without its tag is a copy
+# that cannot be restored without BACKUP_ALLOW_UNTAGGED.
+TAGS=(--include 'clawdia-*.gz.enc.tag' --include 'pre-migration-*.gz.enc.tag')
 if [ "${BACKUP_REMOTE_ALLOW_PLAINTEXT:-}" = "true" ]; then
     INCLUDES=(--include 'clawdia-*.gz' --include 'clawdia-*.gz.enc'
-              --include 'pre-migration-*.gz' --include 'pre-migration-*.gz.enc')
+              --include 'pre-migration-*.gz' --include 'pre-migration-*.gz.enc' "${TAGS[@]}")
 else
-    INCLUDES=(--include 'clawdia-*.gz.enc' --include 'pre-migration-*.gz.enc')
+    INCLUDES=(--include 'clawdia-*.gz.enc' --include 'pre-migration-*.gz.enc' "${TAGS[@]}")
     if [ "${SEALED}" -eq 0 ]; then
         echo "[offsite] ERROR: ${BACKUP_DIR} holds no encrypted archives, only ${PLAINTEXT} plaintext one(s)." >&2
         echo "[offsite] Set BACKUP_ENCRYPTION_PASSPHRASE so the backup service seals them," >&2

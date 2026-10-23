@@ -1,13 +1,13 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { decryptSecret } = require('../../../config/secretBox');
+const { resolveApiKey } = require('../apiKeys');
 const {
     buildAnthropicMcpParams,
     requiresApproval,
-    usesOAuth,
+    needsClientRoute,
     MCP_BETA,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
-const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Anthropic can reach MCP servers two ways, and this module is the only place
 // that has to know it.
@@ -86,6 +86,16 @@ function mcpExtras(useMcp, guildServers) {
 
 function messagesApi(client, beta) {
     return beta ? client.beta.messages : client.messages;
+}
+
+/**
+ * The SDK's per-request options, as arguments to spread: the caller's abort
+ * signal when it has one (#1238), so a request in flight when the turn is
+ * given up on is cancelled rather than left to run and bill. Nothing at all
+ * otherwise, so a call without one is exactly the call it always was.
+ */
+function requestOptions(signal) {
+    return signal ? [{ signal }] : [];
 }
 
 // Responses that used MCP tools also carry mcp_tool_use / mcp_tool_result
@@ -177,11 +187,17 @@ function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botT
     // handed, and an OAuth access token expires in an hour with only the bot
     // able to refresh it. `connector` is a choice between two working routes,
     // and for this connection there is only one.
-    if (usesOAuth(mcpServers)) return true;
+    // The same holds for a server on the operator's private network, which
+    // Anthropic's side cannot reach at all.
+    if (needsClientRoute(mcpServers)) return true;
     if (route === 'client') return true;
     // A guild that named the connector gets the connector, and its actions stay
-    // on the text protocol.
-    if (route === 'connector') return false;
+    // on the text protocol — unless its approval policy could stop a call. The
+    // connector runs calls on Anthropic's side, where no approval prompt can be
+    // put up, so taking it would switch `mcpConfirm` and every `confirmTools`
+    // list off without a word to the admin who set them (#1149). Approvals win
+    // over the route preference, the same way an OAuth connection does above.
+    if (route === 'connector') return requiresApproval(mcpConfirm, mcpServers);
 
     // `auto` below. Bot tools with nothing for the connector to carry is not a
     // choice between two routes: the connector would open no connections at all,
@@ -280,43 +296,49 @@ function addUsage(totals, usage) {
  * running into the first.
  */
 async function* streamWithTools(client, req, toolkit) {
-    const { model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut } = req;
+    const { model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, signal } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
     const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     let wroteText = false;
-    const rounds = roundsFor(toolkit);
 
-    for (let round = 0; ; round++) {
-        // The last permitted round goes out with no tools, which leaves the
-        // model nothing to do but answer — otherwise a turn could end on a tool
-        // call and the user would get an empty message.
-        const offerTools = round < rounds;
-        const response = await client.messages.stream({
-            ...base,
-            messages,
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        });
+    try {
+        for (let round = 0; ; round++) {
+            // A turn given up on starts no new request (#1238).
+            signal?.throwIfAborted();
+            // The last permitted round, or any round once the turn's time is up,
+            // goes out with no tools, which leaves the model nothing to do but
+            // answer — otherwise a turn could end on a tool call and the user would
+            // get an empty message.
+            const offerTools = offersTools(toolkit, round);
+            const response = await client.messages.stream({
+                ...base,
+                messages,
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, ...requestOptions(signal));
 
-        let roundText = false;
-        for await (const event of response) {
-            if (event.type !== 'content_block_delta' || event.delta?.type !== 'text_delta') continue;
-            if (!roundText && wroteText) yield '\n\n';
-            roundText = true;
-            wroteText = true;
-            yield event.delta.text;
+            let roundText = false;
+            for await (const event of response) {
+                if (event.type !== 'content_block_delta' || event.delta?.type !== 'text_delta') continue;
+                if (!roundText && wroteText) yield '\n\n';
+                roundText = true;
+                wroteText = true;
+                yield event.delta.text;
+            }
+
+            const final = await response.finalMessage();
+            sawUsage = addUsage(totals, final.usage) || sawUsage;
+
+            const uses = toolUsesOf(final.content);
+            if (!uses.length || !offerTools) break;
+
+            messages.push({ role: 'assistant', content: final.content });
+            messages.push({ role: 'user', content: await runToolCalls(toolkit, uses) });
         }
-
-        const final = await response.finalMessage();
-        sawUsage = addUsage(totals, final.usage) || sawUsage;
-
-        const uses = toolUsesOf(final.content);
-        if (!uses.length || !offerTools) break;
-
-        messages.push({ role: 'assistant', content: final.content });
-        messages.push({ role: 'user', content: await runToolCalls(toolkit, uses) });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     if (usageOut && sawUsage) usageOut.usage = totals;
@@ -324,32 +346,36 @@ async function* streamWithTools(client, req, toolkit) {
 
 /** The same loop, unstreamed. */
 async function completeWithTools(client, req, toolkit) {
-    const { model, systemPrompt, history, prompt, images, temperature, maxTokens } = req;
+    const { model, systemPrompt, history, prompt, images, temperature, maxTokens, signal } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
     const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
-    const rounds = roundsFor(toolkit);
 
-    for (let round = 0; ; round++) {
-        const offerTools = round < rounds;
-        const response = await client.messages.create({
-            ...base,
-            messages,
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        });
+    try {
+        for (let round = 0; ; round++) {
+            signal?.throwIfAborted();
+            const offerTools = offersTools(toolkit, round);
+            const response = await client.messages.create({
+                ...base,
+                messages,
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, ...requestOptions(signal));
 
-        const text = textOf(response.content);
-        if (text) parts.push(text);
-        sawUsage = addUsage(totals, response.usage) || sawUsage;
+            const text = textOf(response.content);
+            if (text) parts.push(text);
+            sawUsage = addUsage(totals, response.usage) || sawUsage;
 
-        const uses = toolUsesOf(response.content);
-        if (!uses.length || !offerTools) break;
+            const uses = toolUsesOf(response.content);
+            if (!uses.length || !offerTools) break;
 
-        messages.push({ role: 'assistant', content: response.content });
-        messages.push({ role: 'user', content: await runToolCalls(toolkit, uses) });
+            messages.push({ role: 'assistant', content: response.content });
+            messages.push({ role: 'user', content: await runToolCalls(toolkit, uses) });
+        }
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     return {
@@ -359,7 +385,7 @@ async function completeWithTools(client, req, toolkit) {
 }
 
 async function* stream(req) {
-    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers } = req;
+    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, signal } = req;
     const client = new Anthropic({ apiKey });
 
     const toolkit = await clientToolkit(req);
@@ -378,7 +404,8 @@ async function* stream(req) {
     let cachedInputTokens = 0;
 
     for (let turn = 0; ; turn++) {
-        const response = await api.stream({ ...base, ...params, messages });
+        signal?.throwIfAborted();
+        const response = await api.stream({ ...base, ...params, messages }, ...requestOptions(signal));
         let turnOutput = 0;
         for await (const event of response) {
             if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
@@ -407,7 +434,7 @@ async function* stream(req) {
 }
 
 async function complete(req) {
-    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers } = req;
+    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, signal } = req;
     const client = new Anthropic({ apiKey });
 
     const toolkit = await clientToolkit(req);
@@ -425,7 +452,8 @@ async function complete(req) {
     let sawUsage = false;
 
     for (let turn = 0; ; turn++) {
-        const response = await api.create({ ...base, ...params, messages });
+        signal?.throwIfAborted();
+        const response = await api.create({ ...base, ...params, messages }, ...requestOptions(signal));
         parts.push(textOf(response.content));
         if (response.usage) {
             sawUsage = true;
@@ -503,7 +531,7 @@ module.exports = {
     // Which models can answer under a JSON schema natively — here, via a forced
     // tool call (#1044).
     supportsStructured,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'anthropicKey', envKey: process.env.ANTHROPIC_API_KEY, guildId }),
     stream,
     complete,
     structured

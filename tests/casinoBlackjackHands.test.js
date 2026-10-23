@@ -16,6 +16,9 @@ const {
     playDealerHand,
     settleHand,
     isNaturalBlackjack,
+    isSoftHand,
+    totalLabel,
+    dealerPeeks,
 } = require('../src/games/casino/blackjackHands');
 
 /** 'A♠ K♥' -> two card objects. */
@@ -110,7 +113,7 @@ describe('the dealer loop', () => {
         expect(deck).toHaveLength(1);
     });
 
-    it('stands on a soft 17, because the ace has already been demoted', () => {
+    it('stands on a soft 17 — A-6 already totals 17 with the ace at eleven', () => {
         // A + 6 reads 17, so the dealer does not hit it.
         const dealer = hand('A♠ 6♥');
         expect(playDealerHand(dealer, deckOf('5♦'))).toBe(17);
@@ -201,5 +204,67 @@ describe('the deck', () => {
         } finally {
             spy.mockRestore();
         }
+    });
+});
+
+describe('soft and hard totals', () => {
+    it('calls a hand soft while an ace still counts eleven', () => {
+        expect(isSoftHand(hand('A♠ 6♥'))).toBe(true);
+        expect(isSoftHand(hand('A♠ A♥ 5♦'))).toBe(true);
+    });
+
+    it('calls it hard once every ace has been demoted, or when there is none', () => {
+        expect(isSoftHand(hand('A♠ 6♥ K♦'))).toBe(false);
+        expect(isSoftHand(hand('10♠ 7♥'))).toBe(false);
+    });
+});
+
+describe('totalLabel', () => {
+    it('names a soft total as soft', () => {
+        expect(totalLabel(hand('A♠ 6♥'))).toBe('Soft 17');
+    });
+
+    it('names a hard total by its number', () => {
+        expect(totalLabel(hand('A♠ 6♥ K♦'))).toBe('17');
+    });
+
+    it('calls a two-card 21 blackjack', () => {
+        expect(totalLabel(hand('A♠ K♥'))).toBe('Blackjack');
+    });
+
+    it('calls a split hand\'s two-card 21 just 21, since it pays even money', () => {
+        expect(totalLabel(hand('A♠ K♥'), { natural: false })).toBe('21');
+    });
+
+    it('shows a bust with its total', () => {
+        expect(totalLabel(hand('10♠ 7♥ 9♦'))).toBe('Bust (26)');
+    });
+});
+
+describe('dealerPeeks', () => {
+    it('checks the hole card under an ace and under every ten-value card', () => {
+        for (const v of ['A', '10', 'J', 'Q', 'K']) expect([v, dealerPeeks({ value: v, suit: '♠' })]).toEqual([v, true]);
+    });
+
+    it('does not check under anything else', () => {
+        for (const v of ['2', '5', '9']) expect([v, dealerPeeks({ value: v, suit: '♠' })]).toEqual([v, false]);
+    });
+});
+
+describe('settleHand with naturals', () => {
+    it('lets a dealer natural beat a drawn 21 rather than push it', () => {
+        expect(settleHand(21, 21, { dealerNatural: true })).toBe('lose');
+    });
+
+    it('still pushes two naturals', () => {
+        expect(settleHand(21, 21, { dealerNatural: true, playerNatural: true })).toBe('push');
+    });
+
+    it('lets a player natural beat a drawn dealer 21', () => {
+        expect(settleHand(21, 21, { playerNatural: true })).toBe('win');
+    });
+
+    it('still calls a bust a bust against a dealer natural', () => {
+        expect(settleHand(24, 21, { dealerNatural: true })).toBe('bust');
     });
 });

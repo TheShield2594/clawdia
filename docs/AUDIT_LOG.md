@@ -23,7 +23,9 @@ gathering commands' profiles, inventories and prestige, the rest of
 `/market` and `/gift` with `/trade`, and the heist, syndicate and duel
 lobbies, the seasonal-event definition surface, and the casino's odds (#873),
 followed by a re-check of the economy changes that landed after the last pass.
-Every area of the economy has now had a pass. The majority of the codebase
+Every area of the economy has now had a pass. The AI layer — chat, tools,
+deep and scheduled tasks, MCP, and its spend controls — has had one too, with
+the findings it left open listed in its section. The majority of the codebase
 outside it has never been audited; see [Not yet reviewed](#not-yet-reviewed)
 for the full list.
 
@@ -2518,6 +2520,210 @@ two of them touch economy code.
 
 ---
 
+## Economy — Slots Rebuilt
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-fifth pass of #873, over `/casino slots` alone, after a full review
+of the game found two ways to farm it and a presentation well short of the
+rest of the bot. The owner set the target: **94% return to player**. It is now
+exact, over every one of the 64³ stop combinations, in
+`tests/casinoSlotsReels.test.js`.
+
+| Measured | Before | After |
+|---|---|---|
+| reels and features | 92.3% | 92.5% |
+| with the progressive (capped) | unbounded at small stakes | 94.0% |
+| Lucky Charm / Lucky Streak / both | 101.9% / 104.8% / 113.1% | 94.8% / 95.0% / 97.2% (+ ≤1.5% progressive) |
+| 2× Coin Booster | ~169% | not applied |
+
+**Files reviewed/fixed:**
+- `src/games/casino/slots.js` (rewritten), `slotsReels.js` (rewritten)
+- `src/services/casinoJackpotService.js`, `src/commands/economy/casino.js`
+- `src/utils/confirmBet.js`, `src/utils/copyLines.js`, `src/models/User.js`
+- `tests/casinoSlotsReels.test.js` (rewritten), `tests/casinoSlotsGame.test.js`,
+  `tests/helpers/slotsSpins.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **The luck items made slots pay its players.** Lucky Charm re-spun 20% of losses and Lucky Streak refunded 25%: 102%, 105% and 113% together, on bets up to 25,000. At about 1,000 spins an hour, both items (3,500 coins) were worth about +3M coins an hour | On slots they are 3% each, so both together stay under 100% with the whole progressive included | `slotsReels.js` |
+| 2 | **The progressive jackpot paid the same pot to any stake.** A Triple Wild (1 in 16,581) won the whole pool on a 10-coin spin, so slots at the minimum paid more than 100% whenever the pool held more than ~12,700 coins — above its 10,000 seed, nearly always. The random per-bet drop, shared by every casino game, had the same flaw | Both claims are capped in proportion to the winning bet: a Triple Wild takes up to `JACKPOT_CAP_MULT` (327) × the bet, worth 1% of the stake; a random drop up to bet × 0.5% ÷ its trigger chance, worth 0.5%. What a cap leaves stays in the pool. The claim and the remainder are one pipeline write, as before | `casinoJackpotService.js`, `slots.js` |
+| 3 | **A 2× Coin Booster made slots pay about 169%.** It doubled the profit on every win, and slots' wins pay several times the stake | Boosters do not apply to slots, and the paytable says so. Blackjack, keno, cup game, higher-or-lower and poker applied boosters the same way; pass 26 below removed them | `slots.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | About a quarter of all spins were a Cherry or Lemon pair paying 0.5× or 0.75× — a loss shown as a "Two of a Kind" win | Pairs pay only for Bell, Diamond and Star, at 2× or more; every line win pays more than the bet | `slotsReels.js` |
+| 5 | The Hot Reel fired after three losses in a row, so it paid best to whoever kept chasing | A Heat meter fills on every paid spin; the 11th is a Hot Spin. It is claimed atomically, as the streak was | `slots.js`, `User.js` |
+| 6 | 🃏🃏⚡ and 🃏🃏🌸 lost outright under a footer promising Wilds substitute for any symbol — and the loss card added "Wild card assisted!" and "2x Boost applied!" | Wilds substitute for everything but a Scatter and the line is read the way that pays best; a loss card lists nothing that did not help | `slotsReels.js`, `slots.js` |
+| 7 | Free spins: the triggering reel was never shown, the final card said free spins were "incoming" after they had played, labelled the spin "💀 Lost" with Net −bet, and dropped their winnings. Scatters replaced the line win instead of adding to it | The spin that won them is shown with the Scatters in view, then each free spin, then one card with the line, the free spins and their total. Scatters count anywhere in the window, on top of the line | `slots.js`, `slotsReels.js` |
+| 8 | "Spin Again" edited the command's own reply forever, and that token expires fifteen minutes after the command. Past it, coins moved and the message stopped updating | Each replay renders through the button press, which carries a fresh token | `slots.js` |
+| 9 | A bet that needed the large-bet confirmation played inside that private prompt, with "✅ Bet confirmed." above every spin | It plays in a public follow-up | `slots.js` |
+| 10 | A Lucky Charm re-spin of a Hot Reel spin re-rolled the locked reel and still said it was locked | The re-spin keeps reel 1 | `slots.js`, `slotsReels.js` |
+| 11 | The Triple Wild broadcast was posted before the winner's last reel stopped | It follows the winner's result | `slots.js` |
+| 12 | Big-win announcements ignored free-spin winnings, and repeated a win in the channel it was played in | Both counted; the same channel is skipped | `slots.js` |
+| 13 | `slots.announceJackpot`, `jackpotPingHere` and `jackpotChannelId` were read but nothing could set them | `/casino slotsconfig` (Manage Server) | `casino.js` |
+| 14 | "Three Cherrys"; an error left the "Spinning…" card under its message; a break-even pair read as a "partial win!" | Plurals are on the symbol table; an error replaces the reels with an error card; no pair breaks even any more | `slots.js`, `slotsReels.js` |
+
+---
+
+### Presentation
+
+Real reel strips shown through a 3×3 window (the rows above and below the line
+are what the strip holds, so a near miss is genuine), reels that stop one at a
+time with a held last reel when two Wilds, two Scatters or a top pair are
+showing, win tiers (Big / Mega / Epic / Jackpot), a heat meter, a session total,
+Spin / ½ / 2× / Max / Paytable buttons (2× and Max will not step past the guild limit, the
+wallet or the large-bet confirmation), and a paytable that prints each line's
+odds and the return. Autoplay was deliberately left out: the UK Gambling
+Commission banned it on online slots in 2021 as a harm driver.
+
+---
+
+## Economy — Boosters and Luck in the Casino
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-sixth pass of #873, following pass 25's finding that a coin booster
+made slots pay about 169%. Every casino game was measured with the 2× Coin
+Booster, the server coin boost (1.5× by default, stacking to 3×) and Lucky
+Charm / Lucky Streak, exactly where the game is closed-form and by simulation
+for blackjack (1.5M hands, basic strategy) and poker (300k hands, calling every
+hand).
+
+| Game | Base | 1.5× server | 2× booster | Both luck items, before → after |
+|---|---|---|---|---|
+| keno | 92.3% | 120.1% | 148.0% | 117.6% → 98.5% |
+| cup game (take round one) | 93.3% | 123.3% | 153.3% | 120.0% → 98.6% |
+| higher-or-lower (worst call) | 95.0% | 138.3% | 181.7% | 131.7% → 98.6% (any session ≤ 99.0%) |
+| roulette (straight number) | 97.3% | — | — | 116.2% → 98.7% |
+| blackjack | ~99.9% | 123.0% | 146.3% | 110.8% → no save |
+| poker (call every hand) | 97.4% | 117.6% | 137.8% | 108.1% → no save |
+| crash (host holds a charm) | 99.0% | — | — | 118.8% → no save |
+| slots | 94.0% | — | ~169% (pass 25) | 97.2% + ≤1.5% progressive (pass 25) |
+
+Coinflip and dice read neither boosters nor luck items.
+
+**Files reviewed/fixed:**
+- `src/games/casino/{blackjack,keno,cupgame,higherlower,poker,roulette,crash,slots,settlement}.js`
+- `src/services/effectsService.js`, `src/data/defaultShopItems.js`, `src/data/seasonalEvents.js`, `src/commands/economy/boost.js`
+- `tests/casinoLuckAndBoosters.test.js` (added), `tests/pass24CasinoOdds.test.js`, `tests/casinoSettlement.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **A coin booster made every casino game that read one pay its players.** It multiplied the profit on a win, and casino wins are the whole of a game's return above the stake: even the server's own 1.5× boost took keno to 120% and higher-or-lower to 138% | No coin multiplier reaches any casino payout. `settlement.js` lost `boostedPayout` and the blackjack helpers their multiplier argument; the 🚀 notes are gone from the result cards | all five games, `settlement.js` |
+| 2 | **The luck items made every game with a save pay its players.** 20% and 25% everywhere, sized for no game in particular | One table, `CASINO_LUCK` in `effectsService.js`, sized per game so that both items together stay under 99% under the best strategy the game allows. Blackjack, poker and crash return 99% or more before any save, so they get none | `effectsService.js`, every game with a save |
+| 3 | A crash host's Lucky Charm scaled the crash point by 1.2 for the whole lobby — a 1.2× return on every target, 119% for everyone in it | Removed | `crash.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | The shop said the 2× Coin Booster doubled "coin earnings from all sources", Lucky Streak gave "+25% win chance on games", and `/boost`'s coin boost "multiplies all coin earnings" | Each says what it does now, and that the casino is excluded or how little the save is. Descriptions already copied into a guild's shop keep their old text until the shop is re-seeded | `defaultShopItems.js`, `seasonalEvents.js`, `boost.js` |
+
+---
+
+## AI Layer: Unattended Runs, Tools, MCP and Spend
+
+**Status: Audited — findings resolved, some left open with reasons** ◐
+
+Open findings are lettered (B–G); A, who may use a guild's MCP connections, was
+decided after the pass and is fixed as #17.
+
+The first pass over the AI layer, which by October 2026 was about 19,000 lines
+and the fastest-growing part of the codebase outside the economy: chat and DMs,
+the bot's own tools and the agent tools (web search, page reading, conversation
+search, `learn`, image generation), deep tasks and sub-agents, scheduled tasks,
+the MCP client (HTTP, SSE, stdio, OAuth), and the spend controls around all of
+it. Ordered by what can act with nobody watching: scheduled and delegated runs
+first, then what any member can reach, then money.
+
+The finding that set the order: a scheduled run on a guild that had never
+chosen a confirm mode (`off`, the default) called any MCP write tool with no
+one asked, because the per-connection "run without asking in scheduled tasks"
+list is only read for a call that needs confirming. The roadmap's #1045 entry
+called that approval flow the load-bearing safety boundary for unattended runs;
+it was not load-bearing until this pass.
+
+**Files reviewed/fixed:**
+- `src/services/scheduledTaskService.js`, `src/services/ai/{deepTask,delegate,agentTools,botTools,actions,discordChat,directMessages,history,index,rateLimit,apiKeys,usage,images,transcription,speech,embeddings,knowledge}.js`
+- `src/services/ai/mcp/{approval,toolkit,client,connections,oauth,oauthStore,stdio,sse,elicitation,sampling}.js`, `src/config/mcpServers.js`
+- `src/services/ai/providers/{openai,gemini,openrouter,anthropic}.js`
+- `src/commands/ai/ai.js`, `src/dashboard/routes/api/mcpOAuth.js`, `src/models/McpOAuthState.js`
+- `tests/aiEnvKeyMediaCeilings.test.js` (added); `tests/{aiDelegate,scheduledTaskService,aiAgentTools,aiHistoryRetention,aiScheduleCommand,aiEmbeddings,geminiProvider,mcpProviderLoops,mcpConnections,mcpOAuthRoutes,mcpOAuthStore}.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **A scheduled run, or a deep task's sub-agent, called any MCP write tool unasked.** Under the default `off` mode (and `destructive`, for a tool publishing no annotations) nothing needed confirming, so the unattended allowlist was never read. On Claude, `off` also took Anthropic's connector route, where the scheduled tool budget and the round cap do not apply | Unattended turns confirm under at least `writes` (`unattendedConfirmMode`), which also forces the client route. A read the server marks read-only still runs; anything else goes to the list | `mcpServers.js`, `scheduledTaskService.js`, `delegate.js` |
+| 2 | **`read_webpage` could block the event loop for minutes.** Lazy matches against closers that never came (`<nav` and a space × n, `<!--` × n, `<br` × n) cost time in the square of the page — 5 s at 200 KB, and the cap is 2 MB. Any member could ask for such a page, or be steered to one | Linear scans for the skipped elements and comments; every tag pattern is `<[^<>]*>`. An ASCII-only lower-case keeps indices aligned for text that changes length when lower-cased | `agentTools.js` |
+| 3 | **Media spend reached the operator's key with no operator ceiling.** Images, transcription, speech and embeddings resolve their own keys, but the #1147 ceilings applied only when the *chat* key was the operator's — so a guild chatting on its own key with limits at 0 spent the operator's OpenAI or Gemini key on all four, unbounded | Each call on an environment key is held to the operator's ceilings (`budgetRefusal`), whatever the chat key | `rateLimit.js`, `images.js`, `transcription.js`, `speech.js`, `embeddings.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | `learn` writes a note into every member's later prompts and ran unconfirmed, in a turn that may have just read a page telling it to | Confirmed every time | `agentTools.js` |
+| 5 | A sub-agent of an interactive `/ai task` answered approvals from the *scheduled-task* allowlist, which the dashboard promises applies to scheduled tasks only | Children of a task somebody ran refuse every write; only a scheduled run's children read the list | `delegate.js`, `approval.js` |
+| 6 | An OAuth grant was saved onto whatever URL the entry pointed at when the callback landed: a co-admin repointing it mid-consent got the token sent to the new address on every call | The flow records its URL; the grant is saved only onto an entry still at it | `mcpOAuth.js`, `oauthStore.js`, `McpOAuthState.js` |
+| 7 | A history write that failed after the reply was posted fell into the provider-error handler, which in streaming mode edits the placeholder — the first message of a good answer became "Sorry, I hit an error". Two quick mentions made it likely (VersionError on the trimmed array, E11000 on a first turn) | The write is caught and logged; a lost race is written once more against the fresh document | `discordChat.js`, `history.js` |
+| 8 | A channel task kept putting its creator's saved memories in front of the channel after they left or lost Manage Server | It still runs, without them | `scheduledTaskService.js` |
+| 9 | `/ai schedule list` sorted by `fireAt` alone; one-shots are switched off when they run and never pruned, so they pushed live tasks out of the window and out of reach of `/ai schedule remove` | Active tasks first | `ai.js` |
+| 10 | Embeddings ran on every message with no budget check and no ledger row | Checked before, recorded after; a refusal reads as no vector, as any embedding failure did | `embeddings.js` |
+| 11 | OpenRouter's reported per-call cost was dropped, and it has no price table here, so a dollar ceiling never counted OpenRouter chat | Carried through, summed over a turn's rounds only while every round reported one | `providers/openai.js` |
+| 12 | Gemini's thinking tokens are billed as output and were not counted | Added to output | `providers/gemini.js`, `transcription.js` |
+| 13 | `ai.semanticRetrieval.localModel` was read from guild settings — writable through the generic `ai.*` route though no panel shows it — and whatever it named was downloaded from Hugging Face and held for the life of the process | Always the default model | `embeddings.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 14 | OAuth connect and disconnect called `resetMcpCache`, closing every guild's connections and stdio processes with calls in flight | Only that guild's grant entry and the unauthenticated entry it replaced are dropped | `connections.js`, `mcpOAuth.js` |
+| 15 | A timed-out scheduled run was abandoned but not cancelled: it kept starting paid rounds and could post after being marked failed | Aborted on timeout; posts nothing once given up on | `scheduledTaskService.js` |
+| 16 | A monthly-budget refusal in chat read "Rate limit reached (undefined per undefinedm)" | Shows the budget message | `discordChat.js` |
+
+#### Decided and resolved after the pass
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 17 | **Every member who could reach the AI could use every MCP connection the guild had** — a mailbox or calendar connected as a personal assistant included — and with `mcpApprover` at its default (`requester`) could approve their own write on it. `/ai mcp prompt` was open to everyone too | A connection signed in with OAuth is offered only to members with Manage Server, and any other connection can be marked the same way — a dashboard switch, or `managers_only: true` in the config file; `resolveMcpServers` drops them from a list marked for a member (`forMember`), which chat, `/ai task` (and its sub-agents) and the two open `/ai mcp` subcommands mark. `mcpApprover` defaults to `managers`; a guild that saved `requester` keeps it | `mcpServers.js`, `discordChat.js`, `deepTask.js`, `ai.js`, `Guild.js`, `routes/api/mcpServers.js`, `panel-mcp.js`, `ai.ejs` |
+
+---
+
+### Open — found, not fixed in this pass
+
+Each of these is either a decision rather than a defect, or a fix larger than
+the risk it removes. They are listed so they are not rediscovered as new.
+
+| # | Finding | Severity | Why it is open |
+|---|---------|----------|----------------|
+| B | `read_webpage` and `web_search` take any URL or query the model chooses, unconfirmed, so a run that has read private MCP results can be steered to send them out in a query string | Medium | Structural: the fixes (URLs only from the instruction or earlier results; no reads in a turn that has private data) change what the tools are for |
+| C | The monthly ceiling is checked, not reserved: N concurrent turns (sub-agents run in parallel; each shard bumps only its own cache) can all pass at $9.99 of $10 | Medium | Needs an in-flight estimate held per guild and settled per call; overshoot is bounded by a turn's maximum cost × concurrency |
+| D | Memories saved in a DM, and `search_conversations` over DMs and staff-only channels, can be quoted into a public channel of the home server | Low | The data is the asker's own; scoping memories by channel is a schema change |
+| E | The scheduler's due-task scan is not filtered by shard, so one shard's backlog can hold another's tasks for the length of the window | Low | Correctness under sharding only; the claim itself is sound |
+| F | MCP requests follow redirects (each hop SSRF-checked) without checking that a hop stays on https | Low | `redirect: 'error'` would break servers that redirect `/mcp` → `/mcp/`, a common framework default |
+| G | Smaller items: per-guild/per-user task caps race on concurrent creates; an elicitation enum with hundreds of options overflows the 2,000-character prompt; every DM forces a member fetch before any throttle; an image slot is refunded after a billed failure; a burst of voice messages is transcribed before the per-user window is consumed; Ollama has no key gate; the OAuth callback deletes the state before checking who completed it; stdio processes respawn without backoff on a clean exit; tokenless and stdio MCP sessions are shared across guilds; newer Gemini models price at the catch-all `flash`/`pro` rows | Low | Each is small and none moves money or data across a boundary |
+
+---
+
 ## Not yet reviewed
 
 The economy list below maps which pass of #873 audited each area; the
@@ -2547,7 +2753,7 @@ rather than a settled result:
 
 **Everything else uncovered:**
 
-- AI chat, personas, and summaries (`aiService.js`, `summaryService.js`, `ai.js`, `dm.js`)
+- AI summaries and the Dungeon Master (`summaryService.js`, `dm.js`, `services/dm/`) — the rest of the AI layer is audited above, with its open findings listed there
 - RSS feeds and the daily newspaper (`rssService.js`, `newspaperService.js`, `newspaper.js`, `feed.js`)
 - quests and achievements (`questService.js`, `achievementService.js`, `quests.js`, `questgen.js`, `achievements.js`)
 - giveaways (`giveawayService.js`, `giveaway.js`)
@@ -2576,6 +2782,6 @@ progress on 2026-09-23; the gathering commands' remaining surface on
 2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
 syndicate and duel lobbies on 2026-09-23; the seasonal-event definition
 surface on 2026-09-23; the casino's odds on 2026-09-23; and the post-audit
-economy changes were re-checked on 2026-09-24. The "Everything
+economy changes were re-checked on 2026-09-24; and the AI layer on 2026-10-08. The "Everything
 else uncovered" list carries no review date, because nothing in it has been
 reviewed.*

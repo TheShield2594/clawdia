@@ -443,7 +443,7 @@ async function loadAnalytics() {
         if (commandRows.length) {
             insightsCont.insertAdjacentHTML('beforeend', `<div class="panel-head" style="margin-top:1rem"><h3>Command usage / failures</h3></div>`);
             for (const [cmd, m] of commandRows) {
-                insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>/${cmd}</strong><span>${m.total} runs · ${m.failed} failed (${m.total ? Math.round(m.failed/m.total*100) : 0}%)</span></div>`);
+                insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>/${escHtml(cmd)}</strong><span>${escHtml(m.total)} runs · ${escHtml(m.failed)} failed (${m.total ? Math.round(m.failed/m.total*100) : 0}%)</span></div>`);
             }
         }
 

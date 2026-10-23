@@ -1,5 +1,6 @@
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
 const { peekMonthlyUsage, monthlyBudget } = require('./usage');
+const { applyEnvKeyCeilings } = require('./apiKeys');
 
 // Sliding-window AI rate limiting, per user and per channel.
 //
@@ -60,11 +61,20 @@ const deepTaskLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
 const DEEP_TASKS_PER_WINDOW = 3;
 const DEEP_TASK_WINDOW_MS = 60 * 60 * 1000;
 
+// And one for generated images (#1229). A single image costs about what a few
+// dozen chat replies do, so it is not left to the tool-call window, which
+// counts every lookup the same. Per person and guild like the deep-task one;
+// a scheduled run, with nobody to charge, spends from a per-guild key.
+const imageLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+const IMAGES_PER_WINDOW = 5;
+const IMAGE_WINDOW_MS = 60 * 60 * 1000;
+
 setInterval(() => {
     rateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     channelRateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     toolCallLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     deepTaskLimits.cleanup(DEEP_TASK_WINDOW_MS);
+    imageLimits.cleanup(IMAGE_WINDOW_MS);
 }, 15 * 60 * 1000).unref();
 
 /**
@@ -153,6 +163,47 @@ function enforceMonthlyBudget(guildId, rateLimit) {
             usedCost: state.cost.used, limitCost: state.cost.limit
         });
     }
+}
+
+/**
+ * The monthly-ceiling refusal for one call, in words, or null when it may go.
+ *
+ * For the calls that pick their own key apart from the chat provider's —
+ * images, transcription, speech, embeddings. `rateLimit` is the guild's, and
+ * carries the operator's ceilings only when the *chat* key is the operator's
+ * (#1147); a guild chatting on its own key with its limits at 0 would
+ * otherwise spend the operator's OpenAI or Gemini key on these with no
+ * ceiling at all. So a call whose own key is the environment's is held to
+ * those ceilings here, whatever the chat key was.
+ *
+ * @param {string} guildId
+ * @param {?object} rateLimit the guild's limits, as resolveProviderConfig gives them
+ * @param {?string} keySource which key this call runs on ('guild', 'env', null)
+ */
+function budgetRefusal(guildId, rateLimit, keySource) {
+    const limits = keySource === 'env' ? applyEnvKeyCeilings(rateLimit || {}) : rateLimit;
+    if (!limits) return null;
+    try {
+        enforceMonthlyBudget(guildId, limits);
+        return null;
+    } catch (err) {
+        if (err?.name === 'AiBudgetError') return err.message;
+        throw err;
+    }
+}
+
+/**
+ * A guild's own limits from its `ai` settings, before any operator ceiling:
+ * what resolveProviderConfig carries as `rateLimit` for a guild-key provider.
+ */
+function guildLimitsOf(aiSettings = {}) {
+    return {
+        perUser: aiSettings.rateLimitPerUser ?? 0,
+        perChannel: aiSettings.rateLimitPerChannel ?? 0,
+        windowMin: aiSettings.rateLimitWindowMin ?? 10,
+        monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
+        monthlyCost: aiSettings.monthlyCostLimit ?? 0
+    };
 }
 
 function checkRateLimit(userId, limit, windowMin) {
@@ -274,6 +325,25 @@ function checkDeepTaskLimit(guildId, userId) {
     return deepTaskLimits.check(userRateLimitKey(guildId, userId), DEEP_TASK_WINDOW_MS, DEEP_TASKS_PER_WINDOW);
 }
 
+function imageLimitKey(guildId, userId) {
+    return userId ? userRateLimitKey(guildId, userId) : `scheduled:${guildId}`;
+}
+
+/**
+ * Hold one of this person's images (or, with no person, one of this guild's
+ * scheduled-run images) for the hour, before the slow call that makes it — so
+ * two images asked for in the same round cannot both slip under the limit.
+ * Returns a token for refundImageLimit, or null when there is none left.
+ */
+function reserveImageLimit(guildId, userId) {
+    return imageLimits.reserve(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
+}
+
+/** Give back a held image that was never made. */
+function refundImageLimit(token) {
+    imageLimits.release(token);
+}
+
 /** A budget function over one key, in the shape the MCP toolkit spends. */
 function spender(key, windowMs, limit) {
     const budget = () => toolCallLimits.check(key, windowMs, limit);
@@ -287,7 +357,12 @@ module.exports = {
     checkDeepTaskLimit,
     DEEP_TASKS_PER_WINDOW,
     DEEP_TASK_WINDOW_MS,
+    reserveImageLimit,
+    refundImageLimit,
+    IMAGES_PER_WINDOW,
     enforceMonthlyBudget,
+    budgetRefusal,
+    guildLimitsOf,
     AiBudgetError,
     SCHEDULED_TOOL_CALLS_PER_HOUR,
     checkChannelRateLimit,

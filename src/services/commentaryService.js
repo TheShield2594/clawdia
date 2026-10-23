@@ -115,7 +115,7 @@ function sanitize(text) {
 function commentaryEnabled(guildDoc) {
     const ai = guildDoc?.ai;
     if (!ai?.enabled || !ai.eventCommentary) return false;
-    const { provider, apiKey } = resolveProviderConfig(ai);
+    const { provider, apiKey } = resolveProviderConfig(ai, { guildId: guildDoc.guildId });
     return provider === 'ollama' || Boolean(apiKey);
 }
 
@@ -136,7 +136,7 @@ async function eventCommentary(guildDoc, { event, facts }) {
     if (!spec) return null;
     if (!commentaryEnabled(guildDoc)) return null;
 
-    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai);
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai, { guildId: guildDoc.guildId });
     // The guild's own voice, the one it configured for chat. A server whose bot
     // is a sardonic pirate should not turn into a sports anchor for one embed.
     const persona = guildDoc.ai.systemPrompt || 'You are a lively Discord bot commentator.';

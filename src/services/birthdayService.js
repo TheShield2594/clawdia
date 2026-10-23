@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { handlesGuild } = require('../utils/sharding');
 const { getBirthdayFlair } = require('../utils/birthdayFlair');
 const COLORS = require('../utils/embedColors');
+const { grantableRole } = require('../utils/sensitiveRolePermissions');
 
 // The default wish text, mirrored from the Guild schema, used when a guild has
 // somehow stored an empty message so the embed always has a description.
@@ -259,7 +260,8 @@ async function checkBirthdays(client) {
             }
 
             if (cfg.roleId && member.roles.cache.has(cfg.roleId) === false) {
-                await member.roles.add(cfg.roleId).catch(() => null);
+                const role = grantableRole(guild, cfg.roleId, 'birthday-role', member.id);
+                if (role) await member.roles.add(role.id).catch(() => null);
             }
             // Track that they hold the role so tomorrow's cleanup can take it back.
             if (cfg.roleId) u.birthday.roleAssigned = true;

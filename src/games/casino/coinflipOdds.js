@@ -4,7 +4,7 @@
 //
 // Trivial next to `diceOdds.js` — a coin is 50/50 — but it lives beside it for
 // the same reason: no RNG and no Discord, so the rake and what a win pays are
-// tested on their own. The flip itself (the one `Math.random`) stays in the game
+// tested on their own. The flip itself (the one random draw, from secureRandom) stays in the game
 // file; everything here is a function of the stake.
 
 const HEADS = 'Heads';

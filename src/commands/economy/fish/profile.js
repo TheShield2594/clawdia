@@ -443,22 +443,6 @@ const OVERVIEW_ROD_PREVIEW = 5;
 // Chum and Shrimp Bait were both 🦐). One emoji per heading, plus the rod
 // status mark, which is information rather than decoration.
 
-/** Medallion colours for the materials, which have no baked art yet (#1168). */
-const MATERIAL_COLORS = {
-    fish_scale:     '#5dade2',
-    rare_scale:     '#3498db',
-    mythic_scale:   '#9b59b6',
-    pearl:          '#ecf0f1',
-    seaweed_bundle: '#27ae60',
-    driftwood:      '#a0785a',
-    old_coin:       '#f1c40f',
-    shark_tooth:    '#bdc3c7',
-    tentacle_ink:   '#34495e',
-    coral_fragment: '#ff7f7f',
-    rabbits_foot:   '#d7bde2',
-    feather:        '#f5f5f5',
-};
-
 // Hunt drops that fishing recipes also take.
 const HUNT_MATERIAL_NAMES = { rabbits_foot: "Rabbit's Foot", feather: 'Feather' };
 
@@ -481,11 +465,11 @@ function inventoryStock(user) {
         .map(([id, qty]) => ({ iconId: CONSUMABLES[id] ? `fish:${id}` : null, name: CONSUMABLES[id]?.name ?? titleCase(id), count: qty }));
     const materials = Object.entries(f.materials ?? {})
         .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => ({ iconId: `fish:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty, color: MATERIAL_COLORS[id] }));
+        .map(([id, qty]) => ({ iconId: `fish:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty }));
     const huntMats = user.hunt?.materials ?? {};
     for (const id of Object.keys(HUNT_MATERIAL_NAMES)) {
         const qty = huntMats[id] ?? 0;
-        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty, color: MATERIAL_COLORS[id] });
+        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty });
     }
     return { bait, consumables, materials };
 }

@@ -613,6 +613,16 @@ describe('the endpoint a server names', () => {
         expect(() => resolveEndpoint('http://[', URL_, 'test')).toThrow(/not a URL/);
     });
 
+    test('on an operator\'s private-network server, stays on that server\'s origin, http and all', () => {
+        const LAN = 'http://192.168.1.20:3000/sse';
+        expect(resolveEndpoint('/messages?sessionId=abc', LAN, 'test', { privateNetwork: true }))
+            .toBe('http://192.168.1.20:3000/messages?sessionId=abc');
+        expect(() => resolveEndpoint('http://192.168.1.21:3000/messages', LAN, 'test', { privateNetwork: true }))
+            .toThrow(/not the host it was configured as/);
+        // Without the flag the same address is refused.
+        expect(() => resolveEndpoint('/messages', LAN, 'test')).toThrow();
+    });
+
     test('closes the stream when the server never names one', async () => {
         // A server that answers text/event-stream and then says nothing must
         // not hold the handshake open: on this transport there is no response

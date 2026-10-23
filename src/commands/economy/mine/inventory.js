@@ -14,7 +14,7 @@ const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
-const { ensureMineData, durabilityBar, pickaxeStatusEmoji } = require('../../../services/mineService');
+const { ensureMineData, durabilityBar, isCondemned, pickaxeStatusEmoji } = require('../../../services/mineService');
 const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
 const { BLAST_PACKS, CONSUMABLES, MATERIAL_NAMES, PICKAXE_BY_TIER, PICKAXE_BY_SLUG, PICKAXE_UPGRADES } = require('../../../data/mineData');
@@ -130,11 +130,22 @@ function overviewEmbed(interaction, m) {
         if (extra > 0) preview.push(`…and ${extra} more — \`/mine inv category:pickaxes\` for the full list`);
         embed.addFields({ name: `🪓 Pickaxes (${m.pickaxes.length})`, value: preview.join('\n'), inline: false });
 
-        const junk = m.pickaxes.filter(p => p.status === 'broken' || p.status === 'condemned').length;
+        // Only a pickaxe that is broken *and* condemned is junk. A condemned one
+        // still digs until it breaks, and a broken one that is not condemned is a
+        // repair away — telling either to discard itself threw away a working tool.
+        const junk = m.pickaxes.filter(p => p.status === 'broken' && isCondemned(p)).length;
+        const repairable = m.pickaxes.filter(p => p.status === 'broken' && !isCondemned(p)).length;
         if (junk > 0) {
             embed.addFields({
-                name: '🗑️ Unusable',
-                value: `${junk} pickaxe${junk === 1 ? ' is' : 's are'} broken or condemned — clear ${junk === 1 ? 'it' : 'them'} out with \`/mine discard\`.`,
+                name: '🗑️ Beyond Repair',
+                value: `${junk} pickaxe${junk === 1 ? ' is' : 's are'} broken and condemned — clear ${junk === 1 ? 'it' : 'them'} out with \`/mine discard\`.`,
+                inline: false
+            });
+        }
+        if (repairable > 0) {
+            embed.addFields({
+                name: '🔧 Broken',
+                value: `${repairable} pickaxe${repairable === 1 ? ' needs' : 's need'} a repair — \`/mine equip\` it, then \`/mine shop repair\`.`,
                 inline: false
             });
         }
@@ -225,7 +236,7 @@ function pickaxePages(m) {
     const lines = m.pickaxes.map((p, i) => {
         const isEquipped = i === m.equippedPickaxeIndex;
         const bar = durabilityBar(p.currentDurability, p.maxDurability);
-        const upgradeStr = p.upgrade ? ` [${p.upgrade.replace(/_/g, ' ')}]` : '';
+        const upgradeStr = p.upgrade ? ` [${upgradeName(p.upgrade)}]` : '';
         return `**Slot ${i + 1}**${isEquipped ? ' *(equipped)*' : ''} — ${p.name}${upgradeStr} ${pickaxeStatusEmoji(p.status)}\n> ${bar} ${p.currentDurability}/${p.maxDurability}`;
     });
 
@@ -309,9 +320,14 @@ async function handleEquip(interaction) {
     }
 
     const pickaxe = m.pickaxes[slot];
-    if (pickaxe.status === 'broken') {
-        return interaction.reply({ content: `**${pickaxe.name}** is broken and can't be equipped. Repair it first with \`/mine shop repair\`.`, flags: MessageFlags.Ephemeral });
+    // A broken pickaxe can be equipped so it can be repaired: /mine shop repair
+    // works on the equipped pickaxe only, and /mine dig refuses a broken one on
+    // its own. Refusing it here left an unequipped broken pickaxe with no way
+    // back. A condemned one cannot be repaired, so there is nothing to equip it for.
+    if (pickaxe.status === 'broken' && isCondemned(pickaxe)) {
+        return interaction.reply({ content: `**${pickaxe.name}** is broken and condemned — it can't be repaired. Clear it out with \`/mine discard\`.`, flags: MessageFlags.Ephemeral });
     }
+    const brokenNote = pickaxe.status === 'broken' ? ' It is broken — repair it with `/mine shop repair` before digging.' : '';
 
     m.equippedPickaxeIndex = slot;
     user.markModified('mining');
@@ -322,11 +338,11 @@ async function handleEquip(interaction) {
             new EmbedBuilder()
                 .setColor('#b5651d')
                 .setTitle('⛏️ Pickaxe Equipped')
-                .setDescription(`You equipped **${pickaxe.name}**.`)
+                .setDescription(`You equipped **${pickaxe.name}**.${brokenNote}`)
                 .addFields(
                     { name: 'Durability', value: `${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
                     { name: 'Status',     value: `${pickaxeStatusEmoji(pickaxe.status)} ${pickaxe.status}`, inline: true },
-                    { name: 'Upgrade',    value: pickaxe.upgrade ? pickaxe.upgrade.replace(/_/g, ' ') : 'None', inline: true }
+                    { name: 'Upgrade',    value: upgradeName(pickaxe.upgrade) ?? 'None', inline: true }
                 )
                 .setTimestamp()
         ]
@@ -334,6 +350,21 @@ async function handleEquip(interaction) {
 }
 
 // ─── /mine discard <slot> ─────────────────────────────────────────────────────
+
+// Which pickaxe to hand the miner when the one in their hand is discarded: the
+// best one that can still dig, so a discard never swaps a broken pickaxe for
+// another broken one while a working one sits further down the belt. Falls back
+// to the first slot, broken or not, so /mine dig can say "repair it" rather than
+// "you have no pickaxe".
+function replacementIndex(pickaxes) {
+    let best = -1;
+    pickaxes.forEach((p, i) => {
+        if (p.status === 'broken' || !(p.currentDurability > 0)) return;
+        if (best === -1 || (p.tier ?? 0) > (pickaxes[best].tier ?? 0)) best = i;
+    });
+    if (best !== -1) return best;
+    return pickaxes.length > 0 ? 0 : -1;
+}
 
 async function handleDiscard(interaction) {
     const user = await loadMine(interaction);
@@ -363,7 +394,7 @@ async function handleDiscard(interaction) {
     m.pickaxes.splice(index, 1);
 
     if (wasEquipped) {
-        m.equippedPickaxeIndex = m.pickaxes.length > 0 ? 0 : -1;
+        m.equippedPickaxeIndex = replacementIndex(m.pickaxes);
     } else if (m.equippedPickaxeIndex > index) {
         m.equippedPickaxeIndex -= 1;
     }
@@ -398,6 +429,7 @@ module.exports = {
     __test__: {
         overviewEmbed,
         overviewPayload,
+        replacementIndex,
         inventoryStock,
         pickaxePages,
         chargesEmbed,

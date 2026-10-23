@@ -35,6 +35,8 @@ function normalizeSeason(user, seasonId) {
 // primary deliberate money sink.
 const { TIER_COUNT, XP_PER_TIER, TIER_TABLE, loreForTier } = require('../../data/seasonPass');
 const COLORS = require('../../utils/embedColors');
+const { replyBoard } = require('../../utils/leaderboardCard');
+const { buildSeasonBoard } = require('../../utils/economyLeaderboards');
 
 const MAX_TIERS = TIER_COUNT;
 const DEFAULT_PREMIUM_COST = 100_000;
@@ -565,41 +567,7 @@ async function executeClaimAll(interaction) {
 // ── Economy season (issue #238) subcommands ───────────────────────────────────
 
 async function executeLeaderboard(interaction) {
-    const guildSettings = await getGuildSettings(interaction.guild.id);
-    const currentSeason = guildSettings?.currentSeason;
-
-    if (!currentSeason?.id) {
-        return interaction.reply({ content: 'No active economy season on this server.', flags: MessageFlags.Ephemeral });
-    }
-
-    const topUsers = await User.find({ guildId: interaction.guild.id })
-        .sort({ seasonCoins: -1 })
-        .limit(10)
-        .select('userId seasonCoins');
-
-    if (topUsers.length === 0) {
-        return interaction.reply({ content: 'No season data yet.', flags: MessageFlags.Ephemeral });
-    }
-
-    const currency = guildSettings?.economy?.currency ?? '💰';
-    const medals = ['🥇', '🥈', '🥉'];
-    const lines = topUsers.map((u, i) =>
-        `${medals[i] ?? `${i + 1}.`} <@${u.userId}> — **${(u.seasonCoins ?? 0).toLocaleString()}** ${currency}`
-    );
-
-    const endsAt = currentSeason.endsAt
-        ? `<t:${Math.floor(new Date(currentSeason.endsAt).getTime() / 1000)}:R>`
-        : '*No end date*';
-
-    const embed = new EmbedBuilder()
-        .setColor(COLORS.PRIZE)
-        .setTitle(`📊 Season Leaderboard — ${seasonLabel(currentSeason)}`)
-        .setDescription(lines.join('\n'))
-        .addFields({ name: '⏰ Season Ends', value: endsAt, inline: true })
-        .setFooter({ text: 'Only season coins earned this season count — wallet is never reset!' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return replyBoard(interaction, await buildSeasonBoard(interaction));
 }
 
 async function executeSeasonMe(interaction) {

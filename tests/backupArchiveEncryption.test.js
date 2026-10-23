@@ -73,11 +73,23 @@ function openArchive(archivePath, workDir, env = {}) {
     );
 }
 
-const seal = (input, output, passphrase) => execFileSync('openssl', [
+const sealOnly = (input, output, passphrase) => execFileSync('openssl', [
     'enc', '-aes-256-cbc', '-pbkdf2', '-iter', '200000', '-salt',
     '-pass', `env:BACKUP_ENCRYPTION_PASSPHRASE`,
     '-in', input, '-out', output,
 ], { env: { ...process.env, BACKUP_ENCRYPTION_PASSPHRASE: passphrase } });
+
+// Sealed and tagged, as every writer of a .gz.enc now does (#1161). The tag is
+// written by archive.sh's own `write_archive_tag`, so these cases exercise the
+// function the archives are really tagged with.
+const tag = (output, passphrase) => execFileSync(
+    'bash', ['-c', 'set -euo pipefail\n. "$ARCHIVE_LIB"\nwrite_archive_tag "$ARCHIVE_PATH"'],
+    { env: { ...process.env, ARCHIVE_LIB, ARCHIVE_PATH: output, BACKUP_ENCRYPTION_PASSPHRASE: passphrase } },
+);
+const seal = (input, output, passphrase) => {
+    sealOnly(input, output, passphrase);
+    tag(output, passphrase);
+};
 
 describe('opening a backup archive', () => {
     it('hands back a plain archive untouched, and copies nothing', () => {
@@ -122,7 +134,64 @@ describe('opening a backup archive', () => {
         });
 
         expect(path.dirname(run.stdout)).toBe(path.join(dir, 'work'));
-        expect(fs.readdirSync(dir).sort()).toEqual(['clawdia-1.gz.enc', 'work']);
+        expect(fs.readdirSync(dir).sort()).toEqual(['clawdia-1.gz.enc', 'clawdia-1.gz.enc.tag', 'work']);
+    });
+
+    // #1161: CBC has no integrity of its own, so a sealed archive is checked
+    // against its tag before anything is decrypted and handed to mongorestore.
+    withOpenssl('refuses an archive that was altered after it was tagged', () => {
+        const archive = path.join(dir, 'clawdia-1.gz');
+        fs.writeFileSync(archive, 'THE-WHOLE-DATABASE');
+        seal(archive, `${archive}.enc`, 'passphrase');
+        fs.rmSync(archive);
+        // Flip one byte of the ciphertext.
+        const bytes = fs.readFileSync(`${archive}.enc`);
+        bytes[bytes.length - 1] ^= 0x01;
+        fs.writeFileSync(`${archive}.enc`, bytes);
+
+        const run = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase',
+        });
+
+        expect(run.status).not.toBe(0);
+        expect(run.stderr).toMatch(/does not match its tag/);
+        expect(fs.readdirSync(path.join(dir, 'work'))).toEqual([]);
+    });
+
+    withOpenssl('refuses an archive substituted with one sealed under another passphrase', () => {
+        // Whoever substitutes an archive can seal and tag it too — but not
+        // under the operator's passphrase, which is what the tag is keyed by.
+        const archive = path.join(dir, 'clawdia-1.gz');
+        fs.writeFileSync(archive, 'SOMETHING-ELSE');
+        seal(archive, `${archive}.enc`, 'the attacker passphrase');
+        fs.rmSync(archive);
+
+        const run = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'the operator passphrase',
+        });
+
+        expect(run.status).not.toBe(0);
+        expect(run.stderr).toMatch(/does not match its tag/);
+    });
+
+    withOpenssl('refuses an untagged archive unless told it predates tags', () => {
+        const archive = path.join(dir, 'clawdia-1.gz');
+        fs.writeFileSync(archive, 'THE-WHOLE-DATABASE');
+        sealOnly(archive, `${archive}.enc`, 'passphrase');
+        fs.rmSync(archive);
+
+        const refused = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase',
+        });
+        expect(refused.status).not.toBe(0);
+        expect(refused.stderr).toMatch(/BACKUP_ALLOW_UNTAGGED/);
+
+        const allowed = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase',
+            BACKUP_ALLOW_UNTAGGED: 'true',
+        });
+        expect(allowed.status).toBe(0);
+        expect(fs.readFileSync(allowed.stdout, 'utf8')).toBe('THE-WHOLE-DATABASE');
     });
 
     withOpenssl('refuses the wrong passphrase instead of returning garbage', () => {
@@ -138,7 +207,9 @@ describe('opening a backup archive', () => {
         });
 
         expect(run.status).not.toBe(0);
-        expect(run.stderr).toMatch(/did not decrypt/);
+        // Caught by the tag, which is keyed by the passphrase, before decryption
+        // is even tried — and the message names the passphrase as a cause.
+        expect(run.stderr).toMatch(/different BACKUP_ENCRYPTION_PASSPHRASE/);
         // And leaves nothing half-written for a later run to pick up.
         expect(fs.readdirSync(path.join(dir, 'work'))).toEqual([]);
     });
@@ -210,15 +281,21 @@ describe('a backup taken by hand', () => {
 
         expect(run.status).toBe(0);
         expect(run.written).toEqual([expect.stringMatching(/^clawdia-.*\.gz$/)]);
+        // Readable by its owner only (#1161): a plain archive is the database.
+        expect(fs.statSync(path.join(dir, 'out', run.written[0])).mode & 0o077).toBe(0);
     });
 
     withOpenssl('seals the archive, and puts only the sealed file in the directory', () => {
         const run = backup({ BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces' });
 
         expect(run.status).toBe(0);
-        expect(run.written).toEqual([expect.stringMatching(/^clawdia-.*\.gz\.enc$/)]);
+        expect(run.written).toEqual([
+            expect.stringMatching(/^clawdia-.*\.gz\.enc$/),
+            expect.stringMatching(/^clawdia-.*\.gz\.enc\.tag$/),
+        ]);
 
         // And it is the database, sealed — not a file that merely has the name.
+        // Opening it also checks the tag backup.sh wrote.
         const sealed = path.join(dir, 'out', run.written[0]);
         const opened = openArchive(sealed, path.join(dir, 'work'), {
             BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces',
@@ -304,6 +381,8 @@ describe('off-site replication (#900)', () => {
         expect(run.stdout).toContain('Skipping 1 unencrypted archive');
         // Only the sealed pattern reaches rclone.
         expect(run.stdout).toContain('--include clawdia-*.gz.enc');
+        // With their tags, or the remote copy cannot be restored (#1161).
+        expect(run.stdout).toContain('--include clawdia-*.gz.enc.tag');
         expect(run.stdout).not.toMatch(/--include clawdia-\*\.gz(?!\.enc)/);
     });
 
@@ -443,8 +522,25 @@ describe("the backup service's entrypoint", () => {
         const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase' });
 
         expect(run.status).toBe(0);
-        expect(run.archives).toEqual([expect.stringMatching(/^clawdia-.*\.gz\.enc$/)]);
+        expect(run.archives).toEqual([
+            expect.stringMatching(/^clawdia-.*\.gz\.enc$/),
+            expect.stringMatching(/^clawdia-.*\.gz\.enc\.tag$/),
+        ]);
         expect(run.archives.some(f => f.endsWith('.gz'))).toBe(false);
+    });
+
+    withOpenssl('tags the archive the way archive.sh checks it', () => {
+        // The loop cannot source archive.sh (it runs in the stock mongo image
+        // with only the archive directory mounted), so its inline tag is a
+        // second copy — and the proof they agree is that open_archive accepts it.
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces' });
+        const sealed = path.join(dir, 'backups', run.archives.find(f => f.endsWith('.gz.enc')));
+
+        const opened = openArchive(sealed, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces',
+        });
+        expect(opened.status).toBe(0);
+        expect(fs.readFileSync(opened.stdout, 'utf8')).toBe('THE-DATABASE');
     });
 
     withOpenssl('removes the partial plaintext when the dump fails', () => {
@@ -472,5 +568,7 @@ describe("the backup service's entrypoint", () => {
         expect(run.status).toBe(0);
         expect(run.archives).toEqual([expect.stringMatching(/^clawdia-.*\.gz$/)]);
         expect(fs.existsSync(path.join(dir, 'backups', '.backup-ok'))).toBe(true);
+        // Except that the archive is no longer world-readable (#1161).
+        expect(fs.statSync(path.join(dir, 'backups', run.archives[0])).mode & 0o077).toBe(0);
     });
 });

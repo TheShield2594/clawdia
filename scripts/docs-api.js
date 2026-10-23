@@ -74,7 +74,13 @@ const MIDDLEWARE_LABELS = [
 // `head` is listed even though no route uses one today: a HEAD route the
 // parser did not know about would be dropped from the table in silence, which
 // is the one thing generating the table is meant to make impossible.
-const ROUTE_RE = /^router\.(get|head|post|put|patch|delete|all)\(\s*'([^']+)'\s*,([^)]*)/;
+//
+// The chain runs to the end of the line rather than to the first `)`, because
+// `requireGuildPermission('BanMembers')` carries its own parentheses.
+const ROUTE_RE = /^router\.(get|head|post|put|patch|delete|all)\(\s*'([^']+)'\s*,(.*)$/;
+// A per-action Discord permission (#1154), rendered after "guild admin" as the
+// permission's name, e.g. "Ban Members".
+const PERMISSION_RE = /requireGuildPermission\(([^)]*)\)/g;
 // Anything else that looks like a route definition. Matching one of these means
 // this parser has gone blind to a real endpoint, which is the failure mode a
 // generated list exists to prevent, so it is an error rather than a skip.
@@ -127,6 +133,12 @@ function requirements(argsText) {
         argsText.split(',').map(part => part.trim()).filter(part => /^[A-Za-z_$][\w$]*$/.test(part))
     );
     const labels = MIDDLEWARE_LABELS.filter(([name]) => named.has(name)).map(([, label]) => label);
+    const permissions = [...argsText.matchAll(PERMISSION_RE)]
+        .flatMap(m => [...m[1].matchAll(/'(\w+)'/g)].map(p => p[1].replace(/([a-z])([A-Z])/g, '$1 $2')));
+    if (permissions.length) {
+        const at = labels.includes('guild admin') ? labels.indexOf('guild admin') + 1 : labels.length;
+        labels.splice(at, 0, ...permissions);
+    }
     return labels.length ? labels : ['public'];
 }
 

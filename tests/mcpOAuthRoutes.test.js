@@ -31,7 +31,7 @@ const mockInspect = jest.fn();
 jest.mock('../src/services/ai/mcp/inspect', () => ({ inspectServer: (...a) => mockInspect(...a) }));
 
 const mockResetCache = jest.fn();
-jest.mock('../src/services/ai/mcp/connections', () => ({ resetMcpCache: (...a) => mockResetCache(...a) }));
+jest.mock('../src/services/ai/mcp/connections', () => ({ resetOAuthConnection: (...a) => mockResetCache(...a) }));
 
 const mockDiscover = jest.fn();
 const mockRegister = jest.fn();
@@ -167,7 +167,7 @@ describe('starting a flow', () => {
         const { body } = await api('POST', '/guild/g1/mcp-servers/linear/oauth/start');
         const flow = McpOAuthState.create.mock.calls[0][0];
 
-        expect(flow).toMatchObject({ guildId: 'g1', server: 'linear', clientId: 'cid', startedBy: 'admin-1' });
+        expect(flow).toMatchObject({ guildId: 'g1', server: 'linear', url: 'https://mcp.example.com/mcp', clientId: 'cid', startedBy: 'admin-1' });
         expect(flow._id).toBe(new URL(body.authorizationUrl).searchParams.get('state'));
         // The challenge in the URL is the hash of the verifier that was stored,
         // never the verifier itself.
@@ -269,6 +269,7 @@ describe('coming back from the consent screen', () => {
         _id: 'st',
         guildId: 'g1',
         server: 'linear',
+        url: 'https://mcp.linear.app/sse',
         verifier: 'ver',
         redirectUri: 'https://dash.example.com/api/mcp/oauth/callback',
         discovery: DISCOVERY,
@@ -295,7 +296,7 @@ describe('coming back from the consent screen', () => {
         // The guild comes from the stored flow, never from anything in the URL.
         expect(mockSaveGrant).toHaveBeenCalledWith('g1', 'linear', expect.objectContaining({
             accessToken: 'at', refreshToken: 'rt', connectedBy: 'admin-1',
-        }));
+        }), { url: 'https://mcp.linear.app/sse' });
         expect(text).toContain('Connected');
     });
 
@@ -303,7 +304,7 @@ describe('coming back from the consent screen', () => {
     // and its cached tool list is whatever an unauthenticated server answered.
     test('drops the connection cache so the next message uses the new login', async () => {
         await api('GET', '/mcp/oauth/callback?state=st&code=abc');
-        expect(mockResetCache).toHaveBeenCalled();
+        expect(mockResetCache).toHaveBeenCalledWith('https://mcp.linear.app/sse', 'g1', 'linear');
     });
 
     // The admin who started the flow, not whoever holds the session on return.
@@ -431,7 +432,7 @@ describe('coming back from the consent screen', () => {
         const { status, text } = await api('GET', '/mcp/oauth/callback?state=st&code=abc');
 
         expect(status).toBe(400);
-        expect(text).toMatch(/removed while you were authorizing/);
+        expect(text).toMatch(/removed or pointed at a different address while you were authorizing/);
     });
 
     test('a refused exchange says what the server said', async () => {
@@ -455,7 +456,7 @@ describe('signing out', () => {
         expect(body.success).toBe(true);
         expect(mockClearGrant).toHaveBeenCalledWith('g1', 'linear');
         expect(McpOAuthState.deleteMany).toHaveBeenCalledWith({ guildId: 'g1', server: 'linear' });
-        expect(mockResetCache).toHaveBeenCalled();
+        expect(mockResetCache).toHaveBeenCalledWith('https://mcp.example.com/mcp', 'g1', 'linear');
     });
 
     test('404s when there is no login stored', async () => {

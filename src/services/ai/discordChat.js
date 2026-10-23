@@ -1,12 +1,15 @@
 const User = require('../../models/User');
-const { resolveMcpServers } = require('../../config/mcpServers');
+const { resolveMcpServers, forMember } = require('../../config/mcpServers');
 const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
 const { getEmbedder } = require('./embeddings');
+const { missingKeyMessage } = require('./apiKeys');
 const { retrieveCommands, commandSection } = require('./commandHelp');
 const { retrieveGameData, gameDataSection } = require('./gameData');
 const { collectImages, loadImages, visionNotice } = require('./vision');
+const { collectVoice, transcribeClip, voiceTurn } = require('./transcription');
+const { shouldSpeak, sendSpokenReply } = require('./speech');
 const {
     fitPrompt,
     inputBudget,
@@ -21,6 +24,7 @@ const { createSummarizer, summaryContext } = require('./summarize');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, buildToolActionsAddendum, extractAction, executeAction } = require('./actions');
 const { buildBotTools, BOT_SERVER } = require('./botTools');
+const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildMcpAddendum } = require('./mcp/prompt');
 const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
@@ -166,12 +170,17 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
-    const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers: guildMcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    // Whether the asker has Manage Server: it decides which of the guild's MCP
+    // connections this turn can reach (an OAuth one is somebody's own account,
+    // and a manager's alone — see forMember) and whether it may write notes.
+    const canManage = Boolean(message.member?.permissions?.has('ManageGuild'));
+    const mcpServers = forMember(guildMcpServers, canManage);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
     if (provider !== 'ollama' && !apiKey) {
-        return reply(message, `${providerLabel} is not configured. Add an API key in the dashboard.`);
+        return reply(message, missingKeyMessage(providerLabel, keyError));
     }
 
     const modelError = providerDef?.validateModel?.(model);
@@ -179,7 +188,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         return reply(message, modelError);
     }
 
-    const content = (promptContent ?? message.content).trim();
+    let content = (promptContent ?? message.content).trim();
     if (content.toLowerCase() === '!reset') {
         await clearHistory(message.guild.id, message.channel.id, message.author.id);
         return reply(message, 'Conversation history cleared.');
@@ -191,6 +200,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // downloading is decided later, once the model is known to be able to see.
     const attached = collectImages(message);
     const canSee = supportsVision(provider, model);
+    // And a voice message, which arrives as an audio clip with no text at all.
+    // Only collected when the guild switched transcription on: it is a second
+    // paid call, to a service the guild may not have chosen to use.
+    const voice = aiSettings.voiceTranscription === true ? collectVoice(message) : { clip: null, refused: null };
 
     // A bare `@Clawdia` is all mention and no question. Before the token was
     // stripped this reached the provider as the literal `<@id>`; now it would
@@ -198,15 +211,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // message with no text but a screenshot on it is a question, though — it is
     // how most people ask "what is this?" — so only a message with neither has
     // nothing in it to answer.
-    if (!content && !attached.images.length) {
+    if (!content && !attached.images.length && !voice.clip) {
+        if (voice.refused) return reply(message, `I cannot listen to that voice message: ${voice.refused}.`);
         return reply(message, 'You mentioned me but did not ask anything — what can I help with?');
     }
-
-    // Something still has to arrive as the user's turn when the user typed
-    // nothing at all. This says what happened rather than inventing a question
-    // on their behalf, and it is what goes into the history too, so the next
-    // message's context reads the way this one did.
-    const promptText = content || '[The user sent this attachment with no message text.]';
 
     // A peek, not a consuming check: the slot is spent inside getCompletion /
     // streamCompletion, which is what actually bounds provider spend. This is
@@ -220,6 +228,31 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     if (!peekChannelRateLimit(message.channel.id, rateLimit.perChannel, rateLimit.windowMin)) {
         return reply(message, `This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
     }
+
+    // Whether this turn arrived as speech, which is what `when-spoken-to`
+    // answers aloud (#1231).
+    let spokenTo = false;
+
+    // Transcribed after the limits are peeked, so a member past theirs is not
+    // spending transcription on a reply that will be refused anyway.
+    if (voice.clip) {
+        await message.channel.sendTyping?.()?.catch(() => {});
+        const heard = await transcribeClip(voice.clip, aiSettings, message.guild.id, { rateLimit });
+        if (heard.error) {
+            // Typed text alongside a clip that could not be heard is still a
+            // question; a clip alone is not.
+            if (!content && !attached.images.length) return reply(message, heard.error);
+        } else {
+            content = voiceTurn(heard.text, content);
+            spokenTo = true;
+        }
+    }
+
+    // Something still has to arrive as the user's turn when the user typed
+    // nothing at all. This says what happened rather than inventing a question
+    // on their behalf, and it is what goes into the history too, so the next
+    // message's context reads the way this one did.
+    const promptText = content || '[The user sent this attachment with no message text.]';
 
     const maxHistory = aiSettings.maxHistory ?? 20;
 
@@ -274,7 +307,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // retrieval is exactly the keyword scorer it has always been. Best-effort —
     // a first-message model load or a provider hiccup falls back to keyword
     // rather than failing the reply.
-    const embedder = await getEmbedder(aiSettings).catch(err => {
+    const embedder = await getEmbedder(aiSettings, message.guild?.id).catch(err => {
         console.warn(`[AI:knowledge] semantic embedder unavailable: ${err.message}`);
         return null;
     });
@@ -332,9 +365,19 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // down to whether this request runs the bot's own tool loop: every provider
     // but Anthropic always does, and Anthropic does unless it is taking its own
     // MCP connector, where the bot never sees a call to attach a tool to.
-    const botTools = buildBotTools(message, { enabled: Boolean(aiSettings.actionsEnabled) });
-    const toolActions = botTools.length > 0
-        && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools });
+    const botTools = buildBotTools(message, { enabled: Boolean(aiSettings.actionsEnabled), ai: aiSettings });
+    // Web search and learned notes ride the same loop but are not channel
+    // actions, so they have their own switches rather than `actionsEnabled`.
+    const agentTools = buildAgentTools(aiSettings, {
+        guildId: message.guild.id,
+        userId: message.author.id,
+        canManage,
+        rateLimit
+    });
+    const clientTools = (botTools.length > 0 || agentTools.length > 0)
+        && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools: [...botTools, ...agentTools] });
+    const toolActions = botTools.length > 0 && clientTools;
+    const offeredAgentTools = clientTools ? agentTools : [];
 
     if (mcpActive) {
         // The ACTION sentence only belongs in the MCP rule while there is an
@@ -350,9 +393,16 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         });
     }
     if (toolActions) {
-        sections.push({ id: 'actionRules', required: true, text: buildToolActionsAddendum(userDoc?.timezone) });
+        sections.push({
+            id: 'actionRules',
+            required: true,
+            text: buildToolActionsAddendum(userDoc?.timezone, { autoMemory: aiSettings.memory?.autoSave === true })
+        });
     } else if (aiSettings.actionsEnabled) {
         sections.push({ id: 'actionRules', required: true, text: buildActionsAddendum(userDoc?.timezone) });
+    }
+    if (offeredAgentTools.length) {
+        sections.push({ id: 'agentToolRules', required: true, stable: true, text: buildAgentToolsAddendum(offeredAgentTools) });
     }
 
     try {
@@ -466,7 +516,12 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // before spending the guild's model budget on a server's behalf. Each
         // prompt is its own message with its own clock, so sharing the function
         // shares no state — it is one object rather than two doing the same job.
-        const confirmer = createToolConfirmer(message, { approver: mcpApprover });
+        // In a DM there is nobody else to approve, and the sender was already
+        // held to Manage Server before the message got here
+        // (services/ai/directMessages.js) — but a DM click carries no member
+        // permissions, so `managers` would leave nobody able to say yes.
+        const inDm = Boolean(message.channel?.isDMBased?.());
+        const confirmer = createToolConfirmer(message, { approver: inDm ? 'requester' : mcpApprover });
         const callArgs = {
             provider, model, apiKey, baseUrl,
             systemPrompt: fitted.systemPrompt, history: fitted.history, prompt: fitted.prompt,
@@ -498,7 +553,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             }),
             // The bot's own tools ride the same loop as the servers' — same
             // approval prompt, same activity footer, same result budget.
-            botTools: toolActions ? botTools : [],
+            botTools: [...(toolActions ? botTools : []), ...offeredAgentTools],
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id
@@ -763,6 +818,23 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             );
         }
 
+        // The reply read aloud, when the guild asked for that (#1231). After
+        // the text and only once it is final — a streamed reply is synthesized
+        // once the stream has finished — and never for a reply the outbound
+        // check withheld. In addition to the text, never instead of it, and
+        // silent on failure: the text is the reply. Not awaited: synthesis can
+        // take seconds, and the history write below should not wait on it, or
+        // a quick follow-up would be answered without this turn in context.
+        if (!withheld && fullResponse.trim() && shouldSpeak(aiSettings.voiceReplies, {
+            spokenTo,
+            inDm: message.channel?.isDMBased?.() === true
+        })) {
+            sendSpokenReply(fullResponse, aiSettings, message.guild.id, {
+                rateLimit,
+                deliver: payload => send(message.channel, payload)
+            }).catch(err => console.warn('[AI:voice] spoken reply failed:', err?.message || err));
+        }
+
         // After the reply, never before it: the ledger is for the dashboard, and
         // nothing about it is worth adding to the wait the user is already in.
         //
@@ -770,11 +842,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // panel, one row per server an admin configured, and the bot is not one
         // of them. They still show in the reply's activity footer, which is
         // where "what did it just do" belongs.
-        if (activity.used) {
-            const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
-            if (serverCalls.length || activity.unreachableServers.length) {
-                await recordToolCalls(message.guild.id, serverCalls, activity.unreachableServers);
-            }
+        const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
+        if (serverCalls.length || activity.unreachableServers.length) {
+            await recordToolCalls(message.guild.id, serverCalls, activity.unreachableServers);
         }
 
         // A withheld reply leaves no assistant turn in history: storing the
@@ -787,14 +857,19 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             // bounded by the guild's own limits, and best-effort: the reply is
             // already on screen, and a conversation without a summary is what
             // this guild had yesterday.
+            //
+            // Caught here rather than by the handler below: that one reports a
+            // provider error, and in streaming mode it does so by editing the
+            // placeholder — which is by now the first message of the answer.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
                 promptText, fullResponse, maxHistory,
                 createSummarizer(
                     { provider, model, apiKey, baseUrl, rateLimit },
                     { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
-                )
-            );
+                ),
+                { archive: aiSettings.conversationSearch === true }
+            ).catch(err => console.error('[AI] history write failed:', err?.message || err));
             // Only what the question matched is a source. The background tier
             // is in the prompt because it is recent, not because it answered
             // anything, so citing it would credit an entry nobody retrieved.
@@ -827,6 +902,12 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         };
 
         // The peek above passed but somebody else took the last slot in between.
+        // The monthly budget is a refusal too (rateLimited), but it carries no
+        // per-window limit to quote, and its own message says when it resets.
+        if (error?.name === 'AiBudgetError') {
+            await report(error.message);
+            return;
+        }
         if (error?.rateLimited) {
             await report(error.scope === 'channel'
                 ? 'This channel has reached the AI request limit. Please wait before sending more AI requests here.'

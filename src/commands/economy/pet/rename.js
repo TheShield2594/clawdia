@@ -1,13 +1,16 @@
 'use strict';
 
 const { MessageFlags } = require('discord.js');
-const { PET_DEFINITIONS, resolvePetRef } = require('../../../services/petService');
+const { PET_DEFINITIONS, resolvePetRef, sanitizePetName } = require('../../../services/petService');
 const { isVersionError, withVersionRetry } = require('../../../utils/versionRetry');
 const { NO_SUCH_PET, resolveUser, readSlotOption } = require('./shared');
 
 async function executeRename(interaction) {
-    const newName = interaction.options.getString('name').trim().slice(0, 32);
+    const newName = sanitizePetName(interaction.options.getString('name'));
     const slotRef = readSlotOption(interaction);
+    if (!newName) {
+        return interaction.reply({ content: 'That name has nothing left once mentions and formatting characters are taken out — try letters, numbers or emoji.', flags: MessageFlags.Ephemeral });
+    }
 
     // Setting a name is a pure function of the freshly read roster, so a lost
     // version race replays rather than asking the user to retype the command.

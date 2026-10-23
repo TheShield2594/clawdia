@@ -60,6 +60,7 @@ const COLLECTIONS = [
     { module: 'fishData', export: 'JUNK_ITEMS',      kind: 'fishing junk catch',     system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'TREASURE_ITEMS',  kind: 'fishing treasure catch', system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'BOSS_TYPES',      kind: 'boss fish encounter',    system: 'fishing', command: '/fish cast' },
+    { module: 'fishData', export: 'FIGHT_MOVES',     kind: 'fishing fight move (reel-in and boss rounds)', system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'WEATHER_LIST',    kind: 'fishing weather',        system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'SIZE_TIERS',      kind: 'fish size grade',        system: 'fishing', command: '/fish records' },
     { module: 'fishData', export: 'FAILURE_SEVERITIES', kind: 'failed cast outcome', system: 'fishing', command: '/fish cast' },
@@ -74,12 +75,15 @@ const COLLECTIONS = [
     { module: 'mineData', export: 'DEPTH_LIST',      kind: 'mining depth',           system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'ORES',            kind: 'ore',                    system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'INTENSITY_LEVELS', kind: 'mining intensity',      system: 'mining', command: '/mine dig' },
+    { module: 'mineData', export: 'SEAM_GRADES',     kind: 'mining seam grade (rock survey)', system: 'mining', command: '/mine dig' },
+    { module: 'mineData', export: 'ROCK_STABILITY',  kind: 'mining rock stability (rock survey)', system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'CRAFT_RECIPES',   kind: 'crafting recipe',        system: 'crafting', command: '/craft make' },
     { module: 'mineData', export: 'MINE_QUEST_TEMPLATES', kind: 'mining quest',      system: 'mining', command: '/mine quests view' },
 
     // Exploring
     { module: 'exploreData', export: 'REGION_LIST',  kind: 'explorable region',      system: 'exploring', command: '/explore travel' },
     { module: 'exploreData', export: 'RELIC_LIST',   kind: 'collectible relic',      system: 'exploring', command: '/explore relics' },
+    { module: 'exploreData', export: 'ROUTE_LIST',   kind: 'expedition route',       system: 'exploring', command: '/explore go' },
 
     // Across the three grinds
     { module: 'crossSystemData', export: 'CROSS_CONSUMABLES', kind: 'cross-activity consumable', system: 'crafting', command: '/craft make' },
@@ -141,7 +145,7 @@ const DESCRIPTION_KEYS = ['description', 'desc', 'flavor', 'lore', 'tagline'];
  * id in an answer is a string the user cannot do anything with.
  *
  * The third group is the one worth being deliberate about: `secrets`, `relics`,
- * `landmarks`, `encounters`, `traps` and the narrative lines are the things
+ * `landmarks`, `anomalies`, `encounters`, `traps` and the narrative lines are the things
  * /explore hides until somebody finds them. They are nested inside the region
  * records, so a generic walk would happily tell a player the reward and the
  * reveal text of every secret in a region they have never visited. The length
@@ -153,7 +157,7 @@ const SKIPPED_KEYS = new Set([
     ...NAME_KEYS, ...DESCRIPTION_KEYS,
     'id', 'slug', 'emoji', 'color', 'weight',
     'tierWeights', 'eventWeights', 'zoneMaterials',
-    'intros', 'landmarks', 'encounters', 'traps', 'secrets', 'relics',
+    'intros', 'landmarks', 'anomalies', 'encounters', 'traps', 'secrets', 'relics',
     'treasureLines', 'quietLines', 'footerLines', 'injuryLines',
     'winLine', 'loseLine', 'safeLine', 'reveal', 'line'
 ]);

@@ -496,7 +496,6 @@
         "src/migrations/024_drop_blackjack_toggle.js",
         "src/migrations/025_social_feeds_index.js",
         "src/models/Poll.js",
-        "src/services/districtService.js",
         "src/utils/bigWinLogger.js",
         "src/utils/canvasFilters.js",
         "src/utils/imageRateLimit.js",

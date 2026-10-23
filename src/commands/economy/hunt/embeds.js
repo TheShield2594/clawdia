@@ -13,165 +13,243 @@ const {
     isCondemned,
     getRarePityThreshold,
     getMaxStamina,
+    msUntilNextStamina,
     xpToNextLevel
 } = require('../../../services/huntService');
 const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../../data/materialRarity');
 const { EmbedBuilder } = require('discord.js');
-const { stackBar } = require('../../../utils/rewardReveal');
 const { randomFrom, HUNT_EMPTY_LINES } = require('../../../utils/copyLines');
 const { buildPityStreakField, PITY_COPY } = require('../../../utils/pityBonus');
 const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { WILDERNESS_YIELD_BONUS } = require('./shared');
 const COLORS = require('../../../utils/embedColors');
 
-function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
+// ─── THE RESULT CARD ──────────────────────────────────────────────────────────
+//
+// Read top to bottom, the card answers four questions in the order a player
+// asks them: what did I get, what was it worth, why, and can I go again.
+//
+//   author       the zone — the same header every beat of the encounter wore
+//   title        the animal, graded (crit, trophy quality, headline tier)
+//   description  tier ribbon and flavour, then the payout / XP line and the
+//                multiplier stack; the caller appends the run's own chips
+//                (approach, shot, featured zone) and the pet's line
+//   fields       only what happened this time — traits, a drop, a level-up,
+//                the daily toll, one "Heads Up" for anything that needs doing —
+//                and last the Kit: weapon, stamina, ammo, balance, level, pity
+//                and a live countdown to the next hunt.
+//
+// It used to be sixteen-odd fields of equal weight, most of them status that
+// never changed between hunts, with the reward in the fourth box of a grid.
+
+const tsRel = date => `<t:${Math.floor(new Date(date).getTime() / 1000)}:R>`;
+
+function sceneAuthor(zone, discordUser) {
+    const author = { name: `${zone.emoji} ${zone.name}` };
+    const icon = discordUser?.displayAvatarURL?.();
+    if (icon) author.iconURL = icon;
+    return author;
+}
+
+/**
+ * When this hunter can next head out — the cooldown, an injury, or an empty
+ * stamina bar, whichever lifts last. Returns { ready, at, reason }.
+ */
+function nextHuntReadiness(user, now = Date.now()) {
+    const h = user.hunt;
+    const cooldownAt = h.lastHunt ? new Date(h.lastHunt).getTime() + LIMITS.HUNT_COOLDOWN_MS : 0;
+    const injuryAt   = h.injuryUntil ? new Date(h.injuryUntil).getTime() : 0;
+    let staminaAt = 0;
+    if ((h.stamina ?? 0) <= 0) {
+        try { staminaAt = now + msUntilNextStamina(user); } catch { staminaAt = 0; }
+    }
+    const at = Math.max(cooldownAt, injuryAt, staminaAt);
+    if (at <= now) return { ready: true, at: null, reason: null };
+    const reason = at === staminaAt ? 'stamina' : at === injuryAt ? 'injury' : 'cooldown';
+    return { ready: false, at: new Date(at), reason };
+}
+
+function buildReadinessLine(user, now = Date.now()) {
+    const next = nextHuntReadiness(user, now);
+    if (next.ready) return '🏹 Ready to head back out';
+    if (next.reason === 'injury')  return `🤕 Injured — back on your feet ${tsRel(next.at)}`;
+    if (next.reason === 'stamina') return `😮‍💨 Out of stamina — next point ${tsRel(next.at)}`;
+    return `⏱️ Next hunt ${tsRel(next.at)}`;
+}
+
+function pityState(user, zone) {
+    const sinceRare = user.hunt.sinceRare ?? 0;
+    const threshold = getRarePityThreshold(zone);
+    let heat, label;
+    if (sinceRare >= threshold) {
+        heat  = '⚡';
+        label = `**GUARANTEED NEXT HUNT**`;
+    } else if (sinceRare >= threshold * PITY_HOT_FRACTION) {
+        heat  = '🔥';
+        label = `Getting hot — ~${threshold - sinceRare} more`;
+    } else if (sinceRare >= threshold * PITY_WARM_FRACTION) {
+        heat  = '🌡️';
+        label = `Warming up — ~${threshold - sinceRare} more`;
+    } else {
+        heat  = '❄️';
+        label = `~${threshold - sinceRare} more for guaranteed Rare+`;
+    }
+    return { sinceRare, threshold, heat, label };
+}
+
+/** The status block every result ends on — the things that carry over to the next hunt. */
+function buildKitField(user, weapon, zone, currency, now = Date.now()) {
+    const h = user.hunt;
+    const lines = [];
+
+    lines.push(`🔫 **${weapon.name}** ${weaponStatusEmoji(weapon.status)} \`${durabilityBar(weapon.currentDurability, weapon.maxDurability)}\` ${weapon.currentDurability}/${weapon.maxDurability}`);
+
+    const ammo = ammoContext(user, weapon);
+    lines.push(`⚡ ${h.stamina}/${getMaxStamina(user)} stamina${ammo ? ` · ${ammo.emoji} ${ammo.label} ×${ammo.remaining}` : ''}`);
+
+    const toNext = xpToNextLevel(h.level, h.xp);
+    const levelPart = toNext === null ? `Lv ${h.level} (MAX)` : `Lv ${h.level} — ${toNext.toLocaleString()} XP to Lv ${h.level + 1}`;
+    lines.push(`${currency}${(user.balance ?? 0).toLocaleString()} · 📊 ${levelPart}`);
+
+    if ((h.sinceRare ?? 0) >= 5) {
+        const p = pityState(user, zone);
+        lines.push(`${p.heat} Rare pity ${p.sinceRare}/${p.threshold} — ${p.label}`);
+    }
+
+    lines.push(buildReadinessLine(user, now));
+    return { name: '🎒 Kit', value: lines.join('\n'), inline: false };
+}
+
+/**
+ * Everything on this result that asks the player to do something, in one
+ * place: a broken or worn weapon, the last rounds of ammo, a buff that ran out.
+ * Null when there is nothing to say.
+ */
+function buildHeadsUpField(result, user, weapon, { includeBroken = true } = {}) {
+    const lines = [];
+    if (weapon.status === 'broken') {
+        if (includeBroken) lines.push(`❌ ${buildBrokenWeaponNote(weapon)}`);
+    } else if (weapon.currentDurability <= Math.floor(weapon.maxDurability * 0.20)) {
+        lines.push(`🔧 Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}) — repair soon.`);
+    }
+    const lowAmmo = buildLowAmmoField(user, weapon);
+    if (lowAmmo) lines.push(`${ammoContext(user, weapon).emoji} ${lowAmmo.value}`);
+    if (result.expiredBait)  lines.push(`🪱 Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`);
+    if (result.expiredCharm) lines.push(`🍀 Your luck charm has worn off.`);
+    return lines.length ? { name: '⚠️ Heads Up', value: lines.join('\n'), inline: false } : null;
+}
+
+function buildTraitsField(traits, traitEffects) {
+    if (!traits?.length && !traitEffects?.length) return null;
+    const lines = [];
+    if (traits?.length) {
+        lines.push(traits.map(t => {
+            const def = ANIMAL_TRAITS[t];
+            return def ? `${def.emoji} **${def.name}**` : t;
+        }).join('  '));
+    }
+    for (const e of traitEffects ?? []) lines.push(`• ${e.msg}`);
+    return { name: '🧬 Traits', value: lines.join('\n'), inline: false };
+}
+
+/** "🔥 1.50x × ⚡ 2.00x crit × 🟢 1.20x = 3.60x", or null for a flat kill. */
+function buildMultiplierLine(result) {
+    const { isCrit, critMultiplier, trophyQuality } = result;
+    const streak = result.streakMult ?? 1;
+    const parts = [];
+    if (streak > 1.0) parts.push(`🔥 ${streak.toFixed(2)}x`);
+    if (isCrit)       parts.push(`⚡ ${critMultiplier.toFixed(2)}x crit`);
+    if (trophyQuality && trophyQuality.multiplier > 1.0) parts.push(`${trophyQuality.emoji} ${trophyQuality.multiplier.toFixed(2)}x`);
+    if (!parts.length) return null;
+    const combined = streak * (isCrit ? critMultiplier : 1) * (trophyQuality?.multiplier ?? 1);
+    return `📈 ${parts.join(' × ')} = **${combined.toFixed(2)}x**`;
+}
+
+function buildHuntEmbed(result, user, zone, weapon, currency, discordUser, { now = Date.now() } = {}) {
     if (result.success) {
-        const { animal, tier, traits, finalPayout, isCrit, critMultiplier, trophyQuality, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
+        const { animal, tier, traits, finalPayout, isCrit, trophyQuality, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
         // An event catch keeps its own colour even on a critical: the tier is the
-        // rarer fact of the two, and the title already announces it as one. Without
-        // this a critical event drop rendered crit-gold under a MYTHICAL headline.
+        // rarer fact of the two, and the title already announces it as one.
         const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
 
-        const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const payoutDisplay = cappedByHard
-            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~\n*Daily cap reached — resets in ${formatMs(msUntilDailyReset(user))}*`
-            : `**${currency}${finalPayout.toLocaleString()}**`;
-
-        const qualityLabel = trophyQuality
-            ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
-            : '—';
-
+        const tierLabel  = tier.charAt(0).toUpperCase() + tier.slice(1);
         const tierNum    = TIER_NUM[tier] ?? 1;
         const isEvent    = tier === 'event';
         const isHeadline = tierNum >= 5;   // legendary and event both get the full treatment
-        const ribbon = TIER_RIBBON(tierNum);
+        const ribbon = `${TIER_RIBBON(tierNum)}  **${tierLabel}**`;
+
+        // The headline keeps the animal in the title — it is the trophy.
         const embedTitle = isHeadline
-            ? (isEvent ? `☄️⚡ MYTHICAL FIND ⚡☄️` : `🌟✨ LEGENDARY FIND ✨🌟`)
-            : `${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`;
+            ? `${isEvent ? '☄️ MYTHICAL' : '🌟 LEGENDARY'} — ${animal.emoji} ${isCrit ? 'CRITICAL! ' : ''}${animal.name}`
+            : `${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}`;
         const headlineLede = isEvent
             ? 'Something walked out of the treeline that has no business existing.'
             : 'You found something impossible in the wild.';
-        const embedDesc = isHeadline
-            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [${TIER_STARS[tierNum]}]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : `${ribbon}\n\n*${animal.flavor}*`;
+        const story = isHeadline
+            ? `${ribbon}\n\n${headlineLede}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [${TIER_STARS[tierNum]}]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            : `${ribbon}\n*${animal.flavor}*`;
+
+        const coins = cappedByHard
+            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~ *Daily cap reached — resets in ${formatMs(msUntilDailyReset(user))}*`
+            : `**+${currency}${finalPayout.toLocaleString()}**`;
+        const xp = `✨ **+${xpEarned} XP**${isCrit ? ' (crit bonus)' : ''}`;
+        const grade = trophyQuality ? `${trophyQuality.emoji} ${trophyQuality.label} trophy` : null;
+        const rewardLine = [coins, xp, grade].filter(Boolean).join('  ·  ');
+        const multLine = buildMultiplierLine(result);
 
         const embed = new EmbedBuilder()
             .setColor(color)
+            .setAuthor(sceneAuthor(zone, discordUser))
             .setTitle(embedTitle)
-            .setDescription(embedDesc)
-            .addFields(
-                { name: 'Zone',     value: `${zone.emoji} ${zone.name}`,         inline: true },
-                { name: 'Tier',     value: `${tierLabel}`,                        inline: true },
-                { name: 'Quality',  value: qualityLabel,                          inline: true },
-                { name: 'Reward',   value: payoutDisplay,                         inline: true },
-                { name: 'XP',       value: `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}`, inline: true },
-                { name: 'Weapon',   value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
-                { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
-            );
+            .setDescription([story, '', rewardLine, multLine].filter(v => v !== null).join('\n'));
 
-        const ammoField = buildAmmoField(user, weapon);
-        if (ammoField) embed.addFields(ammoField);
+        const traitsField = buildTraitsField(traits, traitEffects);
+        if (traitsField) embed.addFields(traitsField);
 
-        const huntMultEntries = [];
-        if ((result.streakMult ?? 1) > 1.0) huntMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          huntMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
-        if (trophyQuality && trophyQuality.multiplier > 1.0) huntMultEntries.push({ emoji: trophyQuality.emoji, label: `${trophyQuality.multiplier.toFixed(2)}x` });
-        if (huntMultEntries.length > 0) {
-            const combined = (result.streakMult ?? 1) * critMultiplier * (trophyQuality?.multiplier ?? 1);
-            embed.addFields({ name: '📈 Multipliers', value: stackBar(huntMultEntries, combined, finalPayout, currency), inline: false });
+        if (specialDrop) {
+            embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: true });
         }
-
-        if (traits && traits.length > 0) {
-            const traitLine = traits.map(t => {
-                const def = ANIMAL_TRAITS[t];
-                return def ? `${def.emoji} **${def.name}**` : t;
-            }).join('  ');
-            embed.addFields({ name: '🧬 Traits', value: traitLine, inline: false });
-        }
-
-        if (traitEffects && traitEffects.length > 0) {
-            const effectLines = traitEffects.map(e => `• ${e.msg}`).join('\n');
-            embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
+        if (levelUp) {
+            const ld = getLevelData(levelUp.newLevel);
+            embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: true });
         }
 
         const dailyToll = buildDailyTollField(result, user, currency);
         if (dailyToll) embed.addFields(dailyToll);
 
-        if (specialDrop) {
-            embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
-        }
+        const headsUp = buildHeadsUpField(result, user, weapon);
+        if (headsUp) embed.addFields(headsUp);
 
-        if (levelUp) {
-            const ld = getLevelData(levelUp.newLevel);
-            embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
-        }
+        embed.addFields(buildKitField(user, weapon, zone, currency, now));
 
-        const expiredBuffs = [];
-        if (result.expiredBait)  expiredBuffs.push(`🪱 Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`);
-        if (result.expiredCharm) expiredBuffs.push(`🍀 Your luck charm has worn off.`);
-        if (expiredBuffs.length) {
-            embed.addFields({ name: 'Buffs Expired', value: expiredBuffs.join('\n'), inline: false });
-        }
-
-        if (weapon.status === 'broken') {
-            embed.addFields({ name: '⚠️ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
-        } else if (weapon.currentDurability <= Math.floor(weapon.maxDurability * 0.20)) {
-            embed.addFields({ name: '⚠️ Low Durability', value: `Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}). Repair soon!`, inline: false });
-        }
-
-        const lowAmmoField = buildLowAmmoField(user, weapon);
-        if (lowAmmoField) embed.addFields(lowAmmoField);
-
-        const balanceLine = `${currency}${user.balance.toLocaleString()}`;
-        const xpLine = buildXpLine(user);
-        embed.addFields({ name: 'Balance', value: balanceLine, inline: true }, { name: 'Hunter XP', value: xpLine, inline: true });
-
-        const sinceRareNow = user.hunt.sinceRare ?? 0;
-        if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
-
-        embed.setFooter({ text: `Cooldown: 45s • ${buildActiveConsumablesLine(user)}` });
+        const buffs = buildActiveConsumablesLine(user);
+        if (buffs !== 'No active buffs') embed.setFooter({ text: `Active: ${buffs}` });
         embed.setTimestamp();
         return embed;
     }
 
     const { failure, xpEarned, levelUp, animal: failAnimal, traits: failTraits, traitEffects: failTraitEffects } = result;
+    const story = failAnimal
+        ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}`
+        : `*${failure.severity.id === 'clean_miss' ? randomFrom(HUNT_EMPTY_LINES) : failure.message}*`;
+    const outcomeLine = [
+        '💨 No reward',
+        xpEarned > 0 ? `✨ +${xpEarned} XP` : 'No XP',
+        result.staminaSpared ? '*clean miss — no stamina spent*' : null,
+    ].filter(Boolean).join('  ·  ');
+
     const embed = new EmbedBuilder()
         .setColor(COLORS.ERROR)
+        .setAuthor(sceneAuthor(zone, discordUser))
         .setTitle(buildFailureTitle(failure.severity.id))
-        .setDescription(failAnimal ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}` : `*${failure.severity.id === 'clean_miss' ? randomFrom(HUNT_EMPTY_LINES) : failure.message}*`)
-        .addFields(
-            { name: 'Zone',    value: `${zone.emoji} ${zone.name}`,  inline: true },
-            { name: 'Reward',  value: 'Nothing',                      inline: true },
-            { name: 'XP',      value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
-            { name: 'Weapon',  value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
-            {
-                name: 'Stamina',
-                value: result.staminaSpared
-                    ? `${buildStaminaLine(user)}\n*Clean miss — no stamina spent*`
-                    : buildStaminaLine(user),
-                inline: true
-            }
-        );
-
-    const failAmmoField = buildAmmoField(user, weapon);
-    if (failAmmoField) embed.addFields(failAmmoField);
+        .setDescription(`${story}\n\n${outcomeLine}`);
 
     if ((user.hunt.consecutiveFails ?? 0) > 0) {
         embed.addFields(buildPityStreakField(user.hunt.consecutiveFails, LIMITS, PITY_COPY.hunt));
     }
 
-    if (failTraits && failTraits.length > 0) {
-        const traitLine = failTraits.map(t => {
-            const def = ANIMAL_TRAITS[t];
-            return def ? `${def.emoji} **${def.name}**` : t;
-        }).join('  ');
-        embed.addFields({ name: '🧬 Traits', value: traitLine, inline: false });
-    }
-
-    if (failTraitEffects && failTraitEffects.length > 0) {
-        const effectLines = failTraitEffects.map(e => `• ${e.msg}`).join('\n');
-        embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
-    }
+    const traitsField = buildTraitsField(failTraits, failTraitEffects);
+    if (traitsField) embed.addFields(traitsField);
 
     if (failure.severity.injuryMs > 0) {
         embed.addFields({ name: '🤕 Injured', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });
@@ -180,14 +258,16 @@ function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
     if (result.deathEvent) {
         if (result.deathEvent.saved) {
             embed.setColor('#e67e22');
-            embed.addFields({ name: '🛟 Lifesaver Activated!', value: `A severe injury would have destroyed your **${result.deathEvent.weaponName}**, but your Lifesaver absorbed it! (consumed)`, inline: false });
+            embed.addFields({ name: '🛟 Lifesaver Activated!', value: `A catastrophic encounter would have destroyed your **${result.deathEvent.weaponName}**, but your Lifesaver absorbed it! (consumed)`, inline: false });
         } else {
             embed.setColor('#8B0000');
+            // A wrecked weapon, not a wounded hunter: the event breaks the gun
+            // and sets no injury timer, so it is not called one.
             embed.addFields({
-                name: '💀 Severe Injury!',
+                name: '💀 Catastrophe!',
                 value: isCondemned(weapon)
-                    ? `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright, and it's condemned: too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
-                    : `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright! Use \`/hunt shop repair\` to fix it.`,
+                    ? `The encounter went badly wrong — your **${result.deathEvent.weaponName}** was wrecked outright, and it's condemned: too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
+                    : `The encounter went badly wrong — your **${result.deathEvent.weaponName}** was wrecked outright! Use \`/hunt shop repair\` to fix it.`,
                 inline: false
             });
         }
@@ -198,19 +278,53 @@ function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
         embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
     }
 
-    if (weapon.status === 'broken' && !result.deathEvent) {
-        embed.addFields({ name: '❌ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
-    }
+    const headsUp = buildHeadsUpField(result, user, weapon, { includeBroken: !result.deathEvent });
+    if (headsUp) embed.addFields(headsUp);
 
-    const failLowAmmoField = buildLowAmmoField(user, weapon);
-    if (failLowAmmoField) embed.addFields(failLowAmmoField);
+    embed.addFields(buildKitField(user, weapon, zone, currency, now));
 
-    const sinceRareNow = user.hunt.sinceRare ?? 0;
-    if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
-
-    embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
+    embed.setFooter({ text: 'Tip: consumables from /hunt shop raise your odds' });
     embed.setTimestamp();
     return embed;
+}
+
+// Discord refuses a message outright — not the one embed, the whole edit — past
+// 25 fields in an embed or 6,000 characters across every embed it carries. An
+// apex duel sends the result card and the duel card together, so the budget is
+// the pair's. Rather than lose the result to an exception, the least important
+// fields go first; the Kit, the payout and anything the player was just given
+// are last to go.
+const EMBED_MAX_FIELDS = 25;
+const MESSAGE_MAX_CHARS = 6000;
+const FIELD_DROP_ORDER = ['🧬 Traits', '✨ Bonuses', '⚖️ Daily Limits', '⚠️ Heads Up', '🎒 Kit'];
+
+function embedLength(embed) {
+    const d = embed.data ?? embed;
+    return (d.title?.length ?? 0) + (d.description?.length ?? 0)
+        + (d.footer?.text?.length ?? 0) + (d.author?.name?.length ?? 0)
+        + (d.fields ?? []).reduce((n, f) => n + f.name.length + f.value.length, 0);
+}
+
+function fitEmbeds(embeds) {
+    const total = () => embeds.reduce((n, e) => n + embedLength(e), 0);
+    const dropOne = () => {
+        for (const name of FIELD_DROP_ORDER) {
+            for (const e of embeds) {
+                const idx = (e.data.fields ?? []).findIndex(f => f.name === name);
+                if (idx >= 0) { e.data.fields.splice(idx, 1); return true; }
+            }
+        }
+        // Nothing named is left: drop the last field of the largest embed.
+        const withFields = embeds.filter(e => e.data.fields?.length);
+        if (!withFields.length) return false;
+        withFields.sort((a, b) => embedLength(b) - embedLength(a))[0].data.fields.pop();
+        return true;
+    };
+    for (const e of embeds) {
+        while ((e.data.fields?.length ?? 0) > EMBED_MAX_FIELDS) e.data.fields.pop();
+    }
+    while (total() > MESSAGE_MAX_CHARS && dropOne()) { /* keep trimming */ }
+    return embeds;
 }
 
 function buildBonusLines(result, petYieldPct, petXpPct) {
@@ -284,28 +398,11 @@ const PITY_HOT_FRACTION  = 0.80;
 const PITY_WARM_FRACTION = 0.50;
 
 function buildPityField(user, zone) {
-    const sinceRare  = user.hunt.sinceRare ?? 0;
-    const threshold  = getRarePityThreshold(zone);
+    const { sinceRare, threshold, heat, label } = pityState(user, zone);
     const filled     = Math.min(sinceRare, threshold);
     const barLen     = 16;
     const filledLen  = Math.round((filled / threshold) * barLen);
     const bar        = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
-
-    let heat, label;
-    if (sinceRare >= threshold) {
-        heat  = '⚡';
-        label = `**GUARANTEED NEXT HUNT**`;
-    } else if (sinceRare >= threshold * PITY_HOT_FRACTION) {
-        heat  = '🔥';
-        label = `Getting hot — ~${threshold - sinceRare} more`;
-    } else if (sinceRare >= threshold * PITY_WARM_FRACTION) {
-        heat  = '🌡️';
-        label = `Warming up — ~${threshold - sinceRare} more`;
-    } else {
-        heat  = '❄️';
-        label = `~${threshold - sinceRare} more for guaranteed Rare+`;
-    }
-
     return { name: `${heat} Rare Pity: ${sinceRare}/${threshold}`, value: `\`${bar}\`\n${label}`, inline: false };
 }
 
@@ -415,13 +512,21 @@ module.exports = {
     buildBrokenWeaponNote,
     buildDailyTollField,
     buildFailureTitle,
+    buildHeadsUpField,
     buildHuntEmbed,
+    buildKitField,
     buildLowAmmoField,
+    buildMultiplierLine,
+    buildReadinessLine,
+    buildTraitsField,
+    nextHuntReadiness,
+    sceneAuthor,
     buildPityField,
     buildProgressBar,
     buildStaminaLine,
     buildXpBar,
     buildXpLine,
+    fitEmbeds,
     formatBonuses,
     formatExpiry,
 };

@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const crypto = require('crypto');
 
 const { safeFetchFeed, fetchFeedConditional } = require('../utils/safeFeedFetch');
+const { feedUrlLabel } = require('../utils/feedUrlLabel');
 const { runJob } = require('../utils/jobRunner');
 const { handlesGuild } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
@@ -71,10 +72,10 @@ function shouldSkipDeadFeed(feedUrl) {
 
     const lastFail = feedLastFailTime.get(feedUrl) || 0;
     if (Date.now() - lastFail < DEAD_FEED_COOLDOWN_MS) {
-        console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrl}`);
+        console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrlLabel(feedUrl)}`);
         return true;
     }
-    console.log(`Retrying previously dead feed after cooldown: ${feedUrl}`);
+    console.log(`Retrying previously dead feed after cooldown: ${feedUrlLabel(feedUrl)}`);
     return false;
 }
 
@@ -122,9 +123,9 @@ function recordFeedFailure(feedUrl, error) {
     feedFailCounts.set(feedUrl, newCount);
     feedLastFailTime.set(feedUrl, Date.now());
     if (newCount >= DEAD_FEED_THRESHOLD) {
-        console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrl}`);
+        console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrlLabel(feedUrl)}`);
     } else {
-        console.error(`Error parsing feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
+        console.error(`Error parsing feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrlLabel(feedUrl)}:`, error.message);
     }
 }
 
@@ -209,7 +210,10 @@ function normalizeArticleLink(link = '') {
 }
 
 
-async function fetchSendableChannel(client, channelId) {
+// `guildId` is the guild the subscription belongs to. `channels.fetch` resolves
+// an id in any guild the bot is in, so a channel from somewhere else is
+// refused here rather than posted to (#1140).
+async function fetchSendableChannel(client, channelId, guildId) {
     let channel;
 
     try {
@@ -220,6 +224,10 @@ async function fetchSendableChannel(client, channelId) {
 
     if (!channel || typeof channel.send !== 'function') return null;
     if (typeof channel.isTextBased === 'function' && !channel.isTextBased()) return null;
+    if (channel.guildId !== guildId) {
+        console.error(`[rss] refusing to post to channel ${channelId}: it is not in guild ${guildId}`);
+        return null;
+    }
 
     return channel;
 }
@@ -489,7 +497,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
 
     if (toPost.length) {
         try {
-            const channel = await fetchSendableChannel(client, feed.channelId);
+            const channel = await fetchSendableChannel(client, feed.channelId, guild.guildId);
 
             // No channel is not a delivery. Recording the burst here would drop
             // it for good on a channel that was only briefly unreachable —
@@ -508,7 +516,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
                     const embed = buildItemEmbed(entry.item, entry.date, parsedFeed, feed.url);
                     message = itemMessage(feed, entry.item, parsedFeed, embed);
                 } catch (error) {
-                    console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
+                    console.error(`Skipping an RSS item from ${feedUrlLabel(feed.url)} that could not be rendered:`, error.message);
                     handled.add(entry.key);
                     continue;
                 }
@@ -522,7 +530,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
             // behind may be recorded too — those are not coming.
             for (const entry of fresh) handled.add(entry.key);
         } catch (error) {
-            console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
+            console.error(`Error delivering RSS update for ${feedUrlLabel(feed.url)} to guild ${guild.guildId}:`, error);
         }
     }
 
@@ -580,7 +588,7 @@ async function recordSeen(guild, feed, entries, fresh, handled, { title, posted 
         await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
         return true;
     } catch (error) {
-        console.error(`Error recording RSS progress for ${feed.url} in guild ${guild.guildId}:`, error);
+        console.error(`Error recording RSS progress for ${feedUrlLabel(feed.url)} in guild ${guild.guildId}:`, error);
         return false;
     }
 }
@@ -602,7 +610,7 @@ async function recordFeedFailureOnSubscriptions(url, subscriptions, error) {
         try {
             await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
         } catch (writeError) {
-            console.error(`Error recording RSS failure for ${url} in guild ${guild.guildId}:`, writeError);
+            console.error(`Error recording RSS failure for ${feedUrlLabel(url)} in guild ${guild.guildId}:`, writeError);
         }
     }
 }
@@ -727,7 +735,7 @@ function digestLink(url) {
 }
 
 async function sendDailyNewsForProfile(client, guild, profile) {
-    const channel = await fetchSendableChannel(client, profile.channelId);
+    const channel = await fetchSendableChannel(client, profile.channelId, guild.guildId);
     if (!channel) {
         console.error(`Daily news channel not found for guild ${guild.guildId}, profile ${profile.profileId}`);
         return;

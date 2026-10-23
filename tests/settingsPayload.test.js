@@ -33,6 +33,7 @@ const path = require('path');
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (_req, _res, next) => next(),
     checkGuildAccess: (_req, _res, next) => next(),
+    requireGuildPermission: () => (_req, _res, next) => next(),
     checkWriteRateLimit: (_req, _res, next) => next(),
 }));
 

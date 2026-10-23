@@ -5,6 +5,9 @@ const {
     applyPayoutModifiers,
     msUntilDailyReset,
     executeMine,
+    blastClearCaveIn,
+    digOutCaveIn,
+    abandonCaveIn,
 } = require('../src/services/mineService');
 const { DEPTHS, LIMITS } = require('../src/data/mineData');
 // Mine rolls draw from src/utils/secureRandom.js, not Math.random (CodeQL
@@ -120,5 +123,65 @@ describe('a cave-in holds the earned multiplier in escrow', () => {
         expect(result.caveIn).toBeUndefined();
         expect(result.caveInEscrow).toBeUndefined();
         expect(result.finalPayout).toBeGreaterThan(0);
+    });
+});
+
+// #1194. The swing's XP used to be granted before the cave-in was resolved, so
+// fleeing a legendary still paid legendary-tier XP. It is now held until the
+// choice is made, which also means there is never a level-up to take back.
+describe('a cave-in holds the swing XP until it is resolved', () => {
+    afterEach(() => { restoreRandom(); });
+
+    const deep = { level: 4, name: 'Deep', emoji: '💎', multiplier: 2.0, caveInRisk: 1.0, durLoss: 3 };
+    const safe = { ...deep, caveInRisk: 0.0 };
+    const progress = user => ({ level: user.mining.level, xp: user.mining.xp });
+
+    /** The same swing, with and without the cave-in. */
+    function swings() {
+        mockRandom(0);
+        const clean = miner();
+        const cleanResult = executeMine(clean, 'surface_quarry', { intensity: safe });
+        const caved = miner();
+        const before = progress(caved);
+        const result = executeMine(caved, 'surface_quarry', { intensity: deep });
+        return { clean, cleanResult, caved, before, result };
+    }
+
+    test('nothing is granted while the choice is pending', () => {
+        const { clean, cleanResult, caved, before, result } = swings();
+
+        expect(cleanResult.xpEarned).toBeGreaterThan(0);
+        expect(progress(clean)).not.toEqual(before);
+        expect(result.caveIn).toBe(true);
+        expect(result.caveInXp).toBe(cleanResult.xpEarned);
+        expect(result.xpEarned).toBe(0);
+        expect(result.levelUp).toBeNull();
+        expect(progress(caved)).toEqual(before);
+    });
+
+    test('blasting clear pays the full swing XP', () => {
+        const { clean, cleanResult, caved, result } = swings();
+        blastClearCaveIn(caved, result, null);
+
+        expect(result.xpEarned).toBe(cleanResult.xpEarned);
+        expect(progress(caved)).toEqual(progress(clean));
+    });
+
+    test('digging out pays the full swing XP', () => {
+        const { clean, cleanResult, caved, result } = swings();
+        digOutCaveIn(caved, result, 2);
+
+        expect(result.xpEarned).toBe(cleanResult.xpEarned);
+        expect(progress(caved)).toEqual(progress(clean));
+    });
+
+    test('fleeing forfeits it', () => {
+        const { cleanResult, caved, before, result } = swings();
+        abandonCaveIn(caved, result);
+
+        expect(result.xpEarned).toBe(0);
+        expect(result.levelUp).toBeNull();
+        expect(result.caveInLostXp).toBe(cleanResult.xpEarned);
+        expect(progress(caved)).toEqual(before);
     });
 });

@@ -39,6 +39,7 @@ jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const crash = require('../src/games/casino/crash');
@@ -94,7 +95,7 @@ describe('a cash-out still in flight when the round crashes', () => {
         jest.clearAllMocks();
         errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
         deleteLobby(CHANNEL_ID);
-        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        mockRandom(CRASH_AT_495);
         jest.useFakeTimers();
 
         write = deferred();
@@ -119,7 +120,7 @@ describe('a cash-out still in flight when the round crashes', () => {
     afterEach(() => {
         deleteLobby(CHANNEL_ID);
         jest.useRealTimers();
-        Math.random.mockRestore();
+        restoreRandom();
         errorSpy.mockRestore();
     });
 

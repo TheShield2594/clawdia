@@ -22,7 +22,7 @@ jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: j
 jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
 
 const { __test__ } = require('../src/commands/economy/hunt');
-const { runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS } = __test__;
+const { runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, AIM_FAKEOUT_MS } = __test__;
 
 const USER_ID = 'u1';
 /** Math.random stubbed to 0, so the wait is the bottom of its 1000–2000ms range. */
@@ -52,12 +52,15 @@ function fakeCollector() {
             self.handlers.end?.(null, reason);
         },
 
-        /** The player pressing Fire. Returns false if the window already closed. */
-        async press() {
+        /**
+         * The player pressing Fire. Returns false if the window already closed.
+         * `deferUpdate` stands in for the acknowledgement's round trip.
+         */
+        async press(deferUpdate = async () => {}) {
             if (self.ended) return false;
             self.ended = true;
             clearTimeout(self.timer);
-            await self.handlers.collect({ user: { id: USER_ID }, deferUpdate: async () => {} });
+            await self.handlers.collect({ user: { id: USER_ID }, deferUpdate });
             return true;
         },
     };
@@ -94,12 +97,12 @@ afterEach(() => {
 });
 
 /** Starts the phase with the sights on screen and the button live. */
-async function startPhase(editMs) {
+async function startPhase(editMs, options) {
     const interaction = fakeInteraction(editMs);
     const collector   = fakeCollector();
     const huntMsg     = { createMessageComponentCollector: opts => { collector.options = opts; collector.arm(opts.time); return collector; } };
 
-    const phase = runAimPhase(interaction, huntMsg);
+    const phase = runAimPhase(interaction, huntMsg, options);
     await jest.advanceTimersByTimeAsync(editMs);   // the sights edit lands
 
     // Settling costs the result edit plus the 600ms beat after it.
@@ -238,5 +241,75 @@ describe('firing before the call', () => {
 
         await jest.advanceTimersByTimeAsync(AIM_WAIT_MS + AIM_LATE_MS + 1);
         await settle();
+    });
+});
+
+describe('the acknowledgement is not part of the shot', () => {
+    test('a slow ack does not push a perfect shot into late', async () => {
+        const { collector, settle } = await upToTheCall(0);
+
+        // Pressed 800ms after the call — inside the 900ms window — over a
+        // connection whose ack takes 400ms to come back. Timed after the ack,
+        // this graded 1200ms: late.
+        await jest.advanceTimersByTimeAsync(800);
+        const pressed = collector.press(() => new Promise(r => setTimeout(r, 400)));
+        await jest.advanceTimersByTimeAsync(400);
+        expect(await pressed).toBe(true);
+
+        expect((await settle()).grade).toBe('perfect');
+    });
+
+    test('an ack that fails does not leave the phase waiting forever', async () => {
+        const { collector, settle } = await upToTheCall(0);
+
+        await jest.advanceTimersByTimeAsync(300);
+        await collector.press(() => Promise.reject(new Error('Unknown interaction')));
+
+        expect((await settle()).grade).toBe('perfect');
+    });
+});
+
+describe('the fake-out', () => {
+    test('holds a "steady" beat before the real call', async () => {
+        const { interaction, settle } = await startPhase(0, { fakeOut: true });
+
+        await jest.advanceTimersByTimeAsync(AIM_WAIT_MS);
+        expect(titleAt(interaction, 1)).toMatch(/Steady/);
+        await jest.advanceTimersByTimeAsync(AIM_FAKEOUT_MS);
+        expect(titleAt(interaction, 2)).toBe('💥 FIRE!');
+
+        await jest.advanceTimersByTimeAsync(AIM_LATE_MS + 1);
+        await settle();
+    });
+
+    test('a press on "steady" is still a rushed shot', async () => {
+        const { collector, settle } = await startPhase(0, { fakeOut: true });
+
+        await jest.advanceTimersByTimeAsync(AIM_WAIT_MS + 200);
+        expect(await collector.press()).toBe(true);
+
+        expect((await settle()).grade).toBe('early');
+    });
+
+    test('does not come out of the late grace once the call lands', async () => {
+        const { collector, settle } = await startPhase(0, { fakeOut: true });
+
+        await jest.advanceTimersByTimeAsync(AIM_WAIT_MS + AIM_FAKEOUT_MS);
+        await jest.advanceTimersByTimeAsync(AIM_LATE_MS - 50);
+        expect(collector.ended).toBe(false);
+        expect(await collector.press()).toBe(true);
+
+        expect((await settle()).grade).toBe('late');
+    });
+
+    test('every beat wears the scene header it is handed', async () => {
+        const scene = e => e.setAuthor({ name: '🌲 Whispering Woods' });
+        const { interaction, settle } = await startPhase(0, { fakeOut: true, scene });
+
+        await jest.advanceTimersByTimeAsync(AIM_WAIT_MS + AIM_FAKEOUT_MS + AIM_LATE_MS + 1);
+        await settle();
+        for (const edit of interaction.edits) {
+            expect(edit.embeds[0].data.author.name).toBe('🌲 Whispering Woods');
+        }
     });
 });

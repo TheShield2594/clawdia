@@ -15,6 +15,7 @@ const {
     applyHungerDecay,
     effectiveHunger,
     checkRunaway,
+    bondAfterRunaway,
 } = require('../../../services/petService');
 const { MATERIAL_RARITY } = require('../../../data/materialRarity');
 const { onPetCare, notifyQuestComplete } = require('../../../services/questService');
@@ -149,14 +150,17 @@ async function syncHungerAndRunaway(user, interaction) {
         user.pets[i].lastDecayAt     = d.lastDecayAt;
         user.pets[i].starving        = d.starving;
         user.pets[i].starvingStartAt = d.starvingStartAt ?? null;
+        user.pets[i].bond            = d.bond;
     }
 
     const { ranAwayPets } = checkRunaway(user.pets);
     for (const gone of ranAwayPets) {
         // Keep a record so a Revive Scroll can bring the pet back with its
-        // level, bond and battle record intact.
+        // level and battle record intact.
         const snapshot = gone.toObject ? gone.toObject() : { ...gone };
         delete snapshot._id;
+        // Running off costs trust the scroll does not give back (#1186).
+        snapshot.bond = bondAfterRunaway(gone);
         user.deceasedPets.unshift({ ...snapshot, diedAt: new Date() });
         if (gone._id) user.pets.pull(gone._id);
     }
@@ -185,16 +189,22 @@ async function syncHungerAndRunaway(user, interaction) {
             const def = PET_DEFINITIONS[p.petId];
             return `${def?.emoji ?? '🐾'} **${p.name || def?.name || p.petId}**`;
         });
+        // Worded as running away, which is what the code has always modelled
+        // (checkRunaway, RUNAWAY_DAYS) and what a Revive Scroll can undo. The
+        // player-facing text used to say the pet died, which was both harsher
+        // than the bot's tone and at odds with the scroll that brings it back.
         const deathMsg = ranAwayPets.length === 1
-            ? `💀 **${interaction.user.username}**'s pet ${names[0]} passed away from starvation...`
-            : `💀 **${interaction.user.username}**'s pets ${names.join(', ')} passed away from starvation...`;
-        interaction.channel?.send({ content: deathMsg }).catch(() => {});
+            ? `💨 **${interaction.user.username}**'s pet ${names[0]} got too hungry and ran off in search of food...`
+            : `💨 **${interaction.user.username}**'s pets ${names.join(', ')} got too hungry and ran off in search of food...`;
+        // No pings: pet names are player-chosen, and ones saved before names
+        // were sanitised can still hold a mention.
+        interaction.channel?.send({ content: deathMsg, allowedMentions: { parse: [] } }).catch(() => {});
         // followUp only works once the interaction has been answered. /pet battle
         // syncs before it replies, so on that path the public channel message
         // above is the only notice the owner gets — which is why it names them.
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp({
-                content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` for a new companion, or a Revive Scroll from \`/shop\` to bring one back with its level and bond intact.*`,
+                content: `💔 After days without food, ${names.join(', ')} ran away.\n*A Revive Scroll from \`/shop\` calls ${ranAwayPets.length > 1 ? 'one of them' : 'them'} home with level and record intact — or \`/pet adopt\` a new companion.*`,
                 flags: MessageFlags.Ephemeral
             }).catch(() => {});
         }

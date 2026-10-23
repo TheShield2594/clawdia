@@ -9,14 +9,26 @@
 # encrypted ones. scripts/restore.sh reads either.
 set -euo pipefail
 
+# Everything this writes is a copy of the database, so nothing it writes is
+# readable by anyone but its owner (#1161): the archive, its tag, and the
+# backup directory when this creates it.
+umask 077
+
+# shellcheck source=scripts/lib/archive.sh
+. "$(dirname "$0")/lib/archive.sh"
+# shellcheck source=scripts/lib/mongotools.sh
+. "$(dirname "$0")/lib/mongotools.sh"
+
 BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
 ARCHIVE="${BACKUP_DIR}/clawdia-${TIMESTAMP}.gz"
 
 # Load .env if present and MONGODB_URI is not already set
 if [ -z "${MONGODB_URI:-}" ] && [ -f "$(dirname "$0")/../.env" ]; then
-    # shellcheck disable=SC1090
-    set -a; source "$(dirname "$0")/../.env"; set +a
+    # Parsed as data, never run as shell (#1161) — see scripts/lib/dotenv.sh.
+    # shellcheck source=scripts/lib/dotenv.sh
+    . "$(dirname "$0")/lib/dotenv.sh"
+    load_dotenv "$(dirname "$0")/../.env"
 fi
 
 MONGO_URI="${MONGODB_URI:-mongodb://localhost:27017/ultrabot}"
@@ -40,17 +52,29 @@ if [ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]; then
     STAGING=$(mktemp -d)
     WORK="${STAGING}/clawdia-${TIMESTAMP}.gz"
     ARCHIVE="${ARCHIVE}.enc"
-    # However this ends — a failed dump, a failed seal, a Ctrl-C between them.
-    # The Docker branch below replaces this trap and carries the same cleanup.
-    trap 'rm -rf "${STAGING}"' EXIT
 fi
+
+# One trap for everything this leaves behind, however it ends — a failed dump,
+# a failed seal, a Ctrl-C between them: the staged plaintext, the file holding
+# the connection string, and the container's temp directory.
+cleanup() {
+    rm -rf "${STAGING:-}" "${TOOLS_DIR:-}"
+    if [ -n "${REMOTE_DIR:-}" ]; then
+        docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
 
 MONGO_URI_MASKED=$(echo "${MONGO_URI}" | sed 's|://[^@]*@|://***@|')
 echo "[backup] Starting backup → ${ARCHIVE}"
 echo "[backup] URI: ${MONGO_URI_MASKED}"
 
 if command -v mongodump &>/dev/null; then
-    mongodump --uri="${MONGO_URI}" --gzip --archive="${WORK}"
+    # The URI goes in a 0600 file, not on the command line where every user of
+    # the host can read the password out of `ps` (#1156).
+    TOOLS_DIR=$(mktemp -d)
+    write_mongo_tools_config "${MONGO_URI}" "${TOOLS_DIR}/tools.yaml"
+    mongodump --config="${TOOLS_DIR}/tools.yaml" --gzip --archive="${WORK}"
 else
     # Fall back to running mongodump inside the Docker container.
     # Replace 'localhost' with '127.0.0.1' so the URI points to the container's
@@ -69,9 +93,11 @@ else
         echo "[backup] ERROR: could not create a temp directory in clawdia-mongodb" >&2
         exit 1
     fi
-    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true; rm -rf "${STAGING:-}"' EXIT
+    # Written inside the container's private directory and handed over stdin,
+    # so the URI is on neither mongodump's command line nor docker exec's.
+    write_container_mongo_tools_config clawdia-mongodb "${CONTAINER_URI}" "${REMOTE_DIR}/tools.yaml"
     docker exec clawdia-mongodb \
-        mongodump --uri="${CONTAINER_URI}" --gzip --archive="${REMOTE_DIR}/backup.gz"
+        mongodump --config="${REMOTE_DIR}/tools.yaml" --gzip --archive="${REMOTE_DIR}/backup.gz"
     docker cp "clawdia-mongodb:${REMOTE_DIR}/backup.gz" "${WORK}"
 fi
 
@@ -89,6 +115,13 @@ if [ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]; then
         echo "[backup] ERROR: encrypting the archive failed; nothing was kept." >&2
         exit 1
     fi
+    # The tag that lets restore.sh and verify-backup.sh detect a substituted
+    # or altered archive before decrypting it (scripts/lib/archive.sh).
+    if ! write_archive_tag "${ARCHIVE}"; then
+        rm -f "${ARCHIVE}" "${ARCHIVE}.tag"
+        echo "[backup] ERROR: tagging the archive failed; nothing was kept." >&2
+        exit 1
+    fi
 fi
 
 SIZE=$(du -sh "${ARCHIVE}" | cut -f1)
@@ -96,5 +129,5 @@ echo "[backup] Done. Archive size: ${SIZE} → ${ARCHIVE}"
 
 # Prune archives older than 30 days. Matches the old ultrabot-* prefix too, so
 # archives written before the rename are still aged out.
-find "${BACKUP_DIR}" \( -name 'clawdia-*.gz' -o -name 'clawdia-*.gz.enc' -o -name 'ultrabot-*.gz' \) -mtime +30 -print -delete \
+find "${BACKUP_DIR}" \( -name 'clawdia-*.gz' -o -name 'clawdia-*.gz.enc' -o -name 'clawdia-*.gz.enc.tag' -o -name 'ultrabot-*.gz' \) -mtime +30 -print -delete \
     && echo "[backup] Pruned backups older than 30 days"

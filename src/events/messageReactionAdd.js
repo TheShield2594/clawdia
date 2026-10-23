@@ -10,7 +10,7 @@ const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const { questRewardPayoutKey } = require('../utils/payoutKey');
 const { sensitivePermissionsOf } = require('../utils/sensitiveRolePermissions');
 const COLORS = require('../utils/embedColors');
-const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../utils/memoryLimits');
+const { MAX_MEMORY_LENGTH, memoryCapFor } = require('../utils/memoryLimits');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -236,11 +236,13 @@ async function handleMemoryPin(reaction, discordUser, guild, client) {
 
     if (!userDoc.pinnedMemories) userDoc.pinnedMemories = [];
 
-    if (userDoc.pinnedMemories.length >= MEMORY_CAP) {
+    const settings = await getGuildSettings(guild.id).catch(() => null);
+    const cap = memoryCapFor(settings?.ai);
+    if (userDoc.pinnedMemories.length >= cap) {
         const dmChannel = await discordUser.createDM().catch(() => null);
         if (dmChannel) {
             await dmChannel.send(
-                `Your pinned memory limit (${MEMORY_CAP}) is full. Use \`/ai memories\` to delete some before pinning more.`
+                `Your pinned memory limit (${cap}) is full. Use \`/ai memories\` to delete some before pinning more.`
             ).catch(() => null);
         }
         return;

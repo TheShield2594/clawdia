@@ -105,6 +105,10 @@ Two module-level APIs differ, and both are used here:
 and `src/utils/eightBallImage.js` — works unchanged. The argument-less
 `toBuffer()` does not exist, but nothing here calls it.
 
+The 8-ball's shake clip is a GIF. It reads each frame back with
+`getImageData` and encodes it with `gifenc`, which is plain JavaScript, so it
+works the same on either backend.
+
 Losing the explicit `weight` on font registration sounds like a regression and
 is not: `GlobalFonts` reads the weight out of the face's own metadata. Both
 backends were asked to measure the same string in regular and bold DejaVu Sans

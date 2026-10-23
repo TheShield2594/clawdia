@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Case = require('../../../models/Case');
-const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, requireGuildPermission, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
@@ -134,7 +134,9 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
 });
 
 // Lifts a ban, attributing it to the dashboard user, and writes an audit entry.
-router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+// Ban Members, not just dashboard access: the bot should not do for a Manage
+// Server user what Discord would refuse them (#1154).
+router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, requireGuildPermission('BanMembers'), checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
@@ -143,13 +145,16 @@ router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAcce
         await logAuditEvent(req, guildId, 'unban', { targetUserId: userId });
         res.json({ success: true });
     } catch (error) {
+        // Logged, not returned: Discord's error text is for the operator's
+        // logs, not for the browser (#1154).
         console.error('Unban error:', error);
-        res.status(500).json({ error: error.message || 'Internal server error' });
+        res.status(500).json({ error: 'Failed to unban the user' });
     }
 });
 
 // Clears a member's timeout, attributing it to the dashboard user, and writes an audit entry.
-router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+// Moderate Members, for the same reason as unban above.
+router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, requireGuildPermission('ModerateMembers'), checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
@@ -160,7 +165,7 @@ router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuild
         res.json({ success: true });
     } catch (error) {
         console.error('Remove timeout error:', error);
-        res.status(500).json({ error: error.message || 'Internal server error' });
+        res.status(500).json({ error: 'Failed to remove the timeout' });
     }
 });
 

@@ -25,8 +25,12 @@ const EVENT_COLOR = '#e74c3c';
 
 // One entry per grind. `mid` is keyed by tier number — 4 epic, 5 legendary,
 // 6 event — and `fanfare` splits on whether the drop is an event-tier one.
+// `eventLabel` is what the event tier is called in that grind's partial
+// reveal, so it matches the fanfare and result embed that follow it rather
+// than the internal tier name.
 const REVEAL_COPY = {
     hunt: {
+        eventLabel: 'MYTHICAL',
         fogTitle: '🌫️ Something stirs in the shadows...',
         fogText:  '*The shadows shift. Something is here.*',
         mid: {
@@ -40,6 +44,7 @@ const REVEAL_COPY = {
         },
     },
     fish: {
+        eventLabel: 'MYTHICAL',
         fogTitle: '🌫️ Something stirs beneath the surface...',
         fogText:  '*The water shimmers. Something extraordinary is here.*',
         mid: {
@@ -53,6 +58,7 @@ const REVEAL_COPY = {
         },
     },
     mine: {
+        eventLabel: 'PRIMORDIAL',
         fogTitle: '🌫️ Your pickaxe strikes something unusual...',
         fogText:  '*The rock face glints in your lantern light.*',
         mid: {
@@ -71,7 +77,7 @@ const RULE = '━━━━━━━━━━━━━━━';
 const framed = text => `${RULE}\n${text}\n${RULE}`;
 
 const MID_COLOR = { 4: EPIC_COLOR, 5: LEGENDARY_COLOR, 6: EVENT_COLOR };
-const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
+const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY' };
 
 /**
  * Reveal a drop, then show the caller's embed.
@@ -82,21 +88,29 @@ const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
  *
  * @param {object} interaction already deferred or replied; this only edits.
  * @param {string|null} tier the drop's rarity name, or null for a miss.
- * @param {object} finalEmbed the result embed to land on.
+ * @param {object|object[]} finalEmbed the result embed to land on, or several.
  * @param {string} activity which grind's copy to use — a key of REVEAL_COPY.
  * @param {Array} [files] attachments the final embed references (e.g. the catch
  *   art `finalEmbed.setThumbnail('attachment://…')` points at). Only the final
  *   edit carries them — the fog/reveal beats show their own art-free embeds — so
  *   the attachment lands exactly on the render that references it.
+ * @param {object} [options]
+ * @param {Array} [options.components] action rows for the final render only —
+ *   buttons that act on the result (e.g. /hunt's "Hunt again") must not be
+ *   pressable while the fog is still hiding what the result is.
  */
-async function stagedLootReveal(interaction, tier, finalEmbed, activity, files = []) {
+async function stagedLootReveal(interaction, tier, finalEmbed, activity, files = [], { components } = {}) {
     const copy = REVEAL_COPY[activity];
     if (!copy) throw new Error(`stagedLootReveal: no reveal copy for "${activity}"`);
 
     // Only the final edit carries the attachments, and only when there are any —
     // the fog/reveal beats show their own art-free embeds, so an empty `files`
     // would just tell Discord to clear attachments that were never added.
-    const finalPayload = files.length ? { embeds: [finalEmbed], files } : { embeds: [finalEmbed] };
+    // An array lands several embeds at once — /hunt's picture card above its
+    // result text.
+    const finalEmbeds = Array.isArray(finalEmbed) ? finalEmbed : [finalEmbed];
+    const finalPayload = files.length ? { embeds: finalEmbeds, files } : { embeds: finalEmbeds };
+    if (components) finalPayload.components = components;
 
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < REVEAL_FROM_TIER) {
@@ -118,7 +132,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed, activity, files =
         const midEmbed = new EmbedBuilder()
             .setColor(MID_COLOR[tierNum])
             .setTitle(copy.mid[tierNum])
-            .setDescription(framed(`❓❓❓  **${MID_LABEL[tierNum]}**  ❓❓❓`));
+            .setDescription(framed(`❓❓❓  **${MID_LABEL[tierNum] ?? copy.eventLabel}**  ❓❓❓`));
         await interaction.editReply({ embeds: [midEmbed] });
         await delay(STAGE_MS);
 

@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } =
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const COLORS = require('../../utils/embedColors');
+const { grantableRole } = require('../../utils/sensitiveRolePermissions');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -59,9 +60,14 @@ module.exports = {
                     lr => lr.level > newLevel && member.roles.cache.has(lr.roleId)
                 );
 
-                const addOutcome = toAdd
-                    ? await member.roles.add(toAdd.roleId).then(() => 'fulfilled').catch(err => { console.error(err); return 'rejected'; })
-                    : 'fulfilled';
+                // A level reward carrying admin or moderator permissions is never
+                // granted (#1141); that counts as a failed add, so the sync says so.
+                const addRole = toAdd && grantableRole(interaction.guild, toAdd.roleId, 'level-reward', member.id);
+                const addOutcome = !toAdd
+                    ? 'fulfilled'
+                    : addRole
+                        ? await member.roles.add(addRole.id).then(() => 'fulfilled').catch(err => { console.error(err); return 'rejected'; })
+                        : 'rejected';
 
                 const removeOutcomes = await Promise.allSettled(
                     toRemove.map(lr => member.roles.remove(lr.roleId))

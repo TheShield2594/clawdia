@@ -151,3 +151,25 @@ describe('tier quests are only handed out where they can be completed', () => {
         }
     });
 });
+
+describe('Pinned injury by depth (#1193)', () => {
+    const { rollFailureSeverity } = require('../src/services/mineService');
+    const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
+    const { LIMITS } = require('../src/data/mineData');
+    // The last of six outcomes is Pinned.
+    const pinned = depth => { __setRandomSourceForTests(() => 0.99); return rollFailureSeverity(depth); };
+    afterEach(() => __setRandomSourceForTests(null));
+
+    test('is gentle at the Surface Quarry and grows with depth to the full penalty in the Abyss', () => {
+        expect(pinned(DEPTHS.surface_quarry)).toMatchObject({ id: 'cave_in', injuryMs: 3 * 60_000 });
+        const lengths = DEPTH_LIST.map(d => pinned(d).injuryMs);
+        for (let i = 1; i < lengths.length; i++) expect(lengths[i]).toBeGreaterThan(lengths[i - 1]);
+        expect(pinned(DEPTHS.the_abyss).injuryMs).toBe(LIMITS.INJURY_PENALTY_MS);
+    });
+
+    test('falls back to the flat penalty without a depth, and leaves the other outcomes injury-free', () => {
+        expect(pinned(undefined).injuryMs).toBe(LIMITS.INJURY_PENALTY_MS);
+        __setRandomSourceForTests(() => 0);
+        expect(rollFailureSeverity(DEPTHS.the_abyss).injuryMs).toBe(0);
+    });
+});

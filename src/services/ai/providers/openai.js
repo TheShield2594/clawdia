@@ -1,6 +1,6 @@
 const OpenAI = require('openai');
-const { decryptSecret } = require('../../../config/secretBox');
-const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { resolveApiKey } = require('../apiKeys');
+const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 const { dataUrl } = require('../vision');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
@@ -14,6 +14,17 @@ const { dataUrl } = require('../vision');
 // (0.25x) — so each row carries its own published cached price rather than a
 // derived one.
 const PRICING = [
+    // Speech, priced at its audio rate (#1230, #1231): a transcription's input
+    // and a speech reply's output are mostly audio tokens, and the ledger does
+    // not split them from the text ones, so the whole call is priced as audio.
+    // Listed first — `^gpt-4o-mini` below would otherwise claim them.
+    { match: /^gpt-4o-mini-transcribe/i, in: 3.00,  out: 5.00 },
+    { match: /^gpt-4o-transcribe/i,      in: 6.00,  out: 10.00 },
+    { match: /^gpt-4o-mini-tts/i,        in: 0.60,  out: 12.00 },
+    // Images (#1229): text in, image tokens out. The prompt is all that goes
+    // in, so the image-input rate never applies.
+    { match: /^gpt-image-1-mini/i,       in: 2.00,  out: 8.00 },
+    { match: /^gpt-image-1/i,            in: 5.00,  out: 40.00 },
     { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60,  cachedIn: 0.075 },
     { match: /^gpt-4o/i,        in: 2.50,  out: 10.00, cachedIn: 1.25 },
     { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60,  cachedIn: 0.10 },
@@ -130,7 +141,13 @@ function usageOf(raw) {
         // cache — a subset of the input, not an addition to it. Recorded for
         // the cache-hit-rate view (#1046). OpenRouter routes through this same
         // path, so a routed model that reports it is counted too.
-        cachedInputTokens: raw.prompt_tokens_details?.cached_tokens || 0
+        cachedInputTokens: raw.prompt_tokens_details?.cached_tokens || 0,
+        // What the call cost in USD, where the endpoint says: OpenRouter does,
+        // and has no price table here (its prices are per routed model), so
+        // without this every OpenRouter row was unpriced and a guild's dollar
+        // ceiling never counted its chat. Absent stays absent — the row reads
+        // as unpriced exactly as before.
+        ...(Number.isFinite(raw.cost) && raw.cost >= 0 ? { cost: raw.cost } : {})
     };
 }
 
@@ -138,10 +155,28 @@ function usageOf(raw) {
 // billed for are the sum. Within a round the last usage report wins, because
 // some OpenAI-compatible endpoints send a running total rather than a final one.
 function addUsage(totals, round) {
-    if (!round) return;
+    const rounds = totals.rounds || 0;
+    Object.defineProperty(totals, 'rounds', { value: rounds + 1, writable: true, configurable: true, enumerable: false });
+    // A round that reported no usage at all still happened, and was billed:
+    // its cost is unknown, so the turn's is too — a later round's reported
+    // cost must not be taken for the whole of it.
+    if (!round) {
+        if ('cost' in totals) totals.cost = null;
+        return;
+    }
     totals.inputTokens += round.inputTokens;
     totals.outputTokens += round.outputTokens;
     totals.cachedInputTokens += round.cachedInputTokens || 0;
+
+    // A reported cost is summed only while every round reported one. A round
+    // that did not makes the total unknown (null), never a partial sum, which
+    // a spend limit would read as the whole of it. The round count is kept off
+    // the enumerable fields, which are what the ledger receives.
+    if ('cost' in round) {
+        totals.cost = rounds === 0 ? round.cost : (Number.isFinite(totals.cost) ? totals.cost + round.cost : null);
+    } else if (rounds > 0 && 'cost' in totals) {
+        totals.cost = null;
+    }
 }
 
 // Streamed tool calls arrive as fragments keyed by index: the name in one
@@ -195,20 +230,30 @@ function rejectsStreamOptions(err) {
  * The retry is safe to make because nothing has been consumed: a request that
  * fails at 400 produced no tokens, ran no tool, and cost nothing to repeat.
  */
-async function openStream(client, params, endpoint) {
-    if (noStreamOptions.has(endpoint)) return client.chat.completions.create(params);
+async function openStream(client, params, endpoint, signal) {
+    if (noStreamOptions.has(endpoint)) return client.chat.completions.create(params, ...requestOptions(signal));
 
     try {
         return await client.chat.completions.create({
             ...params,
             stream_options: { include_usage: true }
-        });
+        }, ...requestOptions(signal));
     } catch (err) {
         if (!rejectsStreamOptions(err)) throw err;
         console.warn(`[AI:openai] ${endpoint} rejects stream_options; usage will go unreported for it`);
         noStreamOptions.add(endpoint);
-        return client.chat.completions.create(params);
+        return client.chat.completions.create(params, ...requestOptions(signal));
     }
+}
+
+/**
+ * The SDK's per-request options, as arguments to spread: the caller's abort
+ * signal when it has one (#1238), so a request in flight when the turn is
+ * given up on is cancelled rather than left to run and bill. Nothing at all
+ * otherwise, so a call without one is exactly the call it always was.
+ */
+function requestOptions(signal) {
+    return signal ? [{ signal }] : [];
 }
 
 function toolCallsOf(message) {
@@ -258,9 +303,8 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     // What `noStreamOptions` is keyed on. `baseURL` is undefined for OpenAI
     // itself, which is a key like any other — and the one endpoint guaranteed
@@ -276,53 +320,59 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     // into the first.
     let wroteText = false;
 
-    for (let round = 0; ; round++) {
-        // On the last permitted round the tools are withheld, which leaves the
-        // model nothing to do but answer. Without that a turn could end on a
-        // tool call, and the user would get an empty message.
-        const offerTools = Boolean(toolkit) && round < rounds;
+    try {
+        for (let round = 0; ; round++) {
+            // A turn given up on starts no new request (#1238).
+            signal?.throwIfAborted();
+            // On the last permitted round, or once the turn's time is up, the tools
+            // are withheld, which leaves the model nothing to do but answer.
+            // Without that a turn could end on a tool call, and the user would get
+            // an empty message.
+            const offerTools = offersTools(toolkit, round);
 
-        const response = await openStream(client, {
-            model,
-            messages,
-            ...tuningParams(model, temperature, maxTokens),
-            stream: true,
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        }, endpoint);
+            const response = await openStream(client, {
+                model,
+                messages,
+                ...tuningParams(model, temperature, maxTokens),
+                stream: true,
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, endpoint, signal);
 
-        let content = '';
-        let roundUsage = null;
-        const pending = new Map();
+            let content = '';
+            let roundUsage = null;
+            const pending = new Map();
 
-        for await (const chunk of response) {
-            const delta = chunk.choices?.[0]?.delta;
-            if (delta?.content) {
-                if (!content && wroteText) yield '\n\n';
-                content += delta.content;
-                wroteText = true;
-                yield delta.content;
+            for await (const chunk of response) {
+                const delta = chunk.choices?.[0]?.delta;
+                if (delta?.content) {
+                    if (!content && wroteText) yield '\n\n';
+                    content += delta.content;
+                    wroteText = true;
+                    yield delta.content;
+                }
+                if (delta?.tool_calls) accumulateToolCalls(pending, delta.tool_calls);
+                if (chunk.usage) {
+                    sawUsage = true;
+                    roundUsage = usageOf(chunk.usage);
+                }
             }
-            if (delta?.tool_calls) accumulateToolCalls(pending, delta.tool_calls);
-            if (chunk.usage) {
-                sawUsage = true;
-                roundUsage = usageOf(chunk.usage);
-            }
+            addUsage(totals, roundUsage);
+
+            const calls = [...pending.values()].filter(call => call.name);
+            // No tools offered means no more rounds: whatever this one produced is
+            // the answer, even if the model tried to call something anyway.
+            if (!calls.length || !offerTools) break;
+            await runToolCalls({ toolkit, messages, calls, content });
         }
-        addUsage(totals, roundUsage);
-
-        const calls = [...pending.values()].filter(call => call.name);
-        // No tools offered means no more rounds: whatever this one produced is
-        // the answer, even if the model tried to call something anyway.
-        if (!calls.length || !offerTools) break;
-        await runToolCalls({ toolkit, messages, calls, content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
@@ -330,35 +380,38 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, images, 
     let sawUsage = false;
     const parts = [];
 
-    for (let round = 0; ; round++) {
-        const offerTools = Boolean(toolkit) && round < rounds;
+    try {
+        for (let round = 0; ; round++) {
+            signal?.throwIfAborted();
+            const offerTools = offersTools(toolkit, round);
 
-        const completion = await client.chat.completions.create({
-            model,
-            messages,
-            ...tuningParams(model, temperature, maxTokens),
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        });
+            const completion = await client.chat.completions.create({
+                model,
+                messages,
+                ...tuningParams(model, temperature, maxTokens),
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, ...requestOptions(signal));
 
-        if (completion.usage) {
-            sawUsage = true;
-            addUsage(totals, usageOf(completion.usage));
+            if (completion.usage) sawUsage = true;
+            addUsage(totals, completion.usage ? usageOf(completion.usage) : null);
+
+            const message = completion.choices?.[0]?.message;
+            const content = message?.content || '';
+            if (content) parts.push(content);
+            const calls = toolCallsOf(message).filter(call => call.name);
+
+            // Text emitted alongside a tool call is a preamble ("let me look that
+            // up"); the answer is the round that stops calling tools — or the last
+            // round, where none were offered to call. The preamble is kept rather
+            // than dropped, so a guild with streaming off reads the same reply a
+            // guild with it on watched arrive.
+            if (!calls.length || !offerTools) {
+                return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
+            }
+            await runToolCalls({ toolkit, messages, calls, content });
         }
-
-        const message = completion.choices?.[0]?.message;
-        const content = message?.content || '';
-        if (content) parts.push(content);
-        const calls = toolCallsOf(message).filter(call => call.name);
-
-        // Text emitted alongside a tool call is a preamble ("let me look that
-        // up"); the answer is the round that stops calling tools — or the last
-        // round, where none were offered to call. The preamble is kept rather
-        // than dropped, so a guild with streaming off reads the same reply a
-        // guild with it on watched arrive.
-        if (!calls.length || !offerTools) {
-            return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
-        }
-        await runToolCalls({ toolkit, messages, calls, content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 }
 
@@ -410,7 +463,7 @@ module.exports = {
     // Which models can answer under a JSON schema natively (#1044). Asked by the
     // registry so a caller does not have to know what OpenAI's names mean.
     supportsStructured,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId }),
     stream,
     complete,
     structured

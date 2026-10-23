@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, requireGuildPermission, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
 const { fetchTransactions, fetchOwedPayouts } = require('../../../utils/ledger');
@@ -15,7 +15,10 @@ const { deleteUserData } = require('../../../utils/userDataRegistry');
 // the same envelope as the lists that do page.
 router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
-    const q = (req.query.q || '').trim();
+    // A repeated `?q=` arrives as an array (and `?q[a]=` as an object), which
+    // has no .trim() — a 500 rather than an empty result (#1161). Only a
+    // string is a search.
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (q.length < 2) return res.json({ items: [] });
     try {
         const results = await req.bot.searchMembers(guildId, q, 10);
@@ -34,7 +37,7 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkW
 
 // Resolves up to 50 comma-separated user ids in `?ids=` to names and avatars.
 router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
-    const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
+    const ids = (typeof req.query.ids === 'string' ? req.query.ids : '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
     if (!ids.length) return res.json({});
     try {
         const users = await req.bot.resolveUsers(ids);
@@ -105,7 +108,10 @@ router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess
 // written back to the guild ledger are defined in one place. The audit log
 // keeps a record that an operator ran the erasure — the who and when the server
 // is entitled to keep even after the member is gone.
-router.delete('/guild/:guildId/members/:userId/data', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+//
+// Administrator rather than Manage Server (#1154): erasure cannot be undone, and
+// no narrower Discord permission covers a member's data.
+router.delete('/guild/:guildId/members/:userId/data', checkAuth, checkGuildAccess, requireGuildPermission('Administrator'), checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid user ID' });
 

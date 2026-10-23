@@ -144,6 +144,33 @@ const JOBS = [
         fn: client => require('../petService').selectPetOfTheWeek(client),
     },
     {
+        // One DM when a pet's passive switches off and one when it is about to
+        // run away (#1181). Hourly: hunger moves 10 points a day.
+        name: 'sendPetHungerWarnings',
+        scope: SCOPE.GUILD,
+        service: 'petWarningService',
+        schedule: '23 * * * *',
+        fn: client => require('../petWarningService').sendPetHungerWarnings(client),
+    },
+    {
+        // Hands back pet-battle stakes a restart stranded mid-battle (#1184),
+        // as sweepStrandedDuels does for /duel; 'guild' scope for the same reason.
+        name: 'sweepStrandedPetBattles',
+        scope: SCOPE.GUILD,
+        service: 'petBattleEscrowSweep',
+        schedule: '*/5 * * * *',
+        fn: client => require('../petBattleEscrowSweep').sweepStrandedPetBattles(client),
+    },
+    {
+        // Pet ladder seasons (#1185): soft-reset the ratings and title the top
+        // three once a season has run out. Hourly is plenty for a 30-day season.
+        name: 'resolvePetLadderSeasons',
+        scope: SCOPE.GUILD,
+        service: 'petLadderService',
+        schedule: '41 * * * *',
+        fn: client => require('../petLadderService').resolvePetLadderSeasons(client),
+    },
+    {
         name: 'applyBankInterest',
         scope: SCOPE.GUILD,
         service: 'bankService',

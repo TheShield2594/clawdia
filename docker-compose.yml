@@ -22,8 +22,10 @@ services:
     # mongodb_data volume; the image skips initialization when data exists. To
     # enable auth on a deployment that already has data, see "Enabling MongoDB
     # authentication" in docs/SETUP_GUIDE.md — it is a few mongosh commands, not a
-    # wipe. Left unset, everything behaves exactly as before (no auth), so
-    # existing deployments keep starting; new ones should set all four.
+    # wipe. Left unset, mongod runs without auth — and since #1151 the bot
+    # refuses to start in production against a credential-less MONGODB_URI, so
+    # set all four. MONGODB_ALLOW_NO_AUTH=true in .env is the deliberate
+    # opt-out for an operator who accepts running without auth.
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
@@ -353,6 +355,7 @@ services:
     networks:
       - db-network      # reaches MongoDB
       - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
+      - browser-network # reaches the optional `playwright` sidecar, nothing else
     logging:
       driver: "json-file"
       options:
@@ -581,6 +584,10 @@ services:
     # tests/stackEntrypointShell.test.js fails on the next one.
     entrypoint: >
       sh -c '
+        # Every file this writes is a copy of the database or says where one
+        # is, so none of them is readable by anyone but root (#1161). Without
+        # this, a plain archive landed 0644 in a directory on the host.
+        umask 077;
         if [ -n "$$MONGODB_URI_FILE" ]; then
           if [ ! -r "$$MONGODB_URI_FILE" ]; then
             echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
@@ -594,6 +601,28 @@ services:
         fi;
         if [ -z "$$MONGODB_URI" ]; then
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
+        fi;
+        # mongodump and mongorestore get the URI from a 0600 --config file and
+        # not from --uri: argv is readable from the host by any user, with no
+        # access to this container at all, and once the URI carries a password
+        # that is the password (#1156). Written once, into this container own
+        # /tmp, as a YAML double-quoted scalar with backslash and double quote
+        # escaped. scripts/lib/mongotools.sh writes the same file for the
+        # scripts run by hand.
+        if ! TOOLS_CONFIG=$$(mktemp); then
+          echo "[backup] Could not create the mongo tools config file"; exit 1;
+        fi;
+        # Removed however this ends, a failed write below included, so the
+        # password does not outlive the loop in the stopped container layer.
+        # As PID 1, sh ignores SIGTERM unless it is trapped, so `docker stop`
+        # would otherwise kill it outright and skip the EXIT trap; the sleep
+        # below is backgrounded and waited on for the same reason, since a
+        # trap is not run while a foreground command is still going.
+        remove_tools_config() { rm -f -- "$$TOOLS_CONFIG"; };
+        trap remove_tools_config EXIT;
+        trap "exit 143" TERM INT;
+        if ! printf "uri: \"%s\"\n" "$$(printf "%s" "$$MONGODB_URI" | sed -e "s/[\\\\\"]/\\\\&/g")" > "$$TOOLS_CONFIG"; then
+          echo "[backup] Could not write the mongo tools config file"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
         # The passphrase the archives are sealed with (#886). `mongodump --gzip`
@@ -676,9 +705,9 @@ services:
         prune() {
           # Prunes the old ultrabot-* prefix too, so archives written before the
           # rename are still aged out instead of accumulating forever. The bot
-          # lands pre-migration-*.gz in the same directory; those are pruned
+          # lands pre-migration-*.gz (.gz.enc when sealed) in the same directory; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" -o -name "clawdia-*.gz.enc.tag" -o -name "pre-migration-*.gz.enc.tag" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
@@ -696,7 +725,7 @@ services:
             WORK=/tmp/clawdia-$$TIMESTAMP.gz;
           fi;
           echo "[backup] Starting backup at $$TIMESTAMP";
-          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$WORK"; then
+          if ! mongodump --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK"; then
             # mongodump has no rollback: a dump killed part-way through leaves
             # whatever it had written under the real name. Left there, that
             # partial file is what the boot catch-up counts as the backup for
@@ -738,15 +767,32 @@ services:
               return 1;
             fi;
             rm -f "$$WORK";
+            # The tag restore.sh and verify-backup.sh check before decrypting,
+            # so a substituted or altered archive is refused rather than
+            # restored over the database (#1161). SHA-256 of the ciphertext,
+            # encrypted under a key from the passphrase and a fixed salt: a MAC
+            # built with -pass env:, because openssl only takes an HMAC key on
+            # the command line. Must match scripts/lib/archive.sh archive_tag.
+            TAG=$$(openssl dgst -sha256 -binary "$$ARCHIVE" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S 636c61776469616d -pass env:BACKUP_ENCRYPTION_PASSPHRASE | od -An -v -tx1 | tr -d " \n" | sed "s/^53616c7465645f5f[0-9a-f]\{16\}//");
+            # OpenSSL 1.1.1 prefixes Salted__ and the salt even with -S; 3.x
+            # does not. Stripped so the tag is the same on either.
+            # A tag that cannot be written leaves an archive restore refuses,
+            # so that is a failed run like an empty tag, not a success.
+            if [ -z "$$TAG" ] || ! printf "%s\n" "$$TAG" > "$$ARCHIVE.tag"; then
+              rm -f "$$ARCHIVE" "$$ARCHIVE.tag";
+              echo "encrypt-failed $$TIMESTAMP" > "$$STATUS";
+              notify "archive $$TIMESTAMP could not be tagged; nothing was kept for it";
+              return 1;
+            fi;
             if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$ARCHIVE" -out "$$WORK"; then
               mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-              rm -f "$$WORK";
+              rm -f "$$WORK" "$$ARCHIVE.tag";
               echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
               notify "archive $$TIMESTAMP did not decrypt back; kept as $$ARCHIVE.unverified and not counted as a backup";
               return 1;
             fi;
           fi;
-          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$WORK" --dryRun --quiet; then
+          if ! mongorestore --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK" --dryRun --quiet; then
             # Renamed rather than kept or deleted. Kept under its own name, an
             # unreadable archive is what --latest picks up and what the boot
             # catch-up counts as the backup for that day; deleted, an operator
@@ -755,7 +801,7 @@ services:
             # --dryRun too). The suffix keeps it off both globs and inside the
             # prune.
             mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-            rm -f "$$WORK";
+            rm -f "$$WORK" "$$ARCHIVE.tag";
             echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
             notify "archive $$TIMESTAMP did not parse back; kept as $$ARCHIVE.unverified and not counted as a backup";
             return 1;
@@ -785,7 +831,7 @@ services:
           if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
           SLEEP=$$(( $$TARGET - $$NOW ));
           echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-          sleep $$SLEEP;
+          sleep $$SLEEP & wait $$!;
           run_backup || true;
           prune;
         done'
@@ -869,6 +915,56 @@ services:
           memory: 64m
     stop_grace_period: 15s
 
+  # Optional headless browser for the AI, off by default (#1234):
+  #
+  #   docker compose --profile browser up -d
+  #
+  # Playwright's own MCP server, for pages read_webpage cannot read: ones that
+  # render with JavaScript, or sit behind a login. It is a sidecar rather than
+  # part of the bot because the bot's image has no browser and no npm. Nothing
+  # uses it until config/mcp-servers.json has an entry pointing at
+  # http://playwright:8931/mcp with "allow_private": true. The tested entry, the
+  # tool lists and the security notes are in docs/SETUP_GUIDE.md, under
+  # "A browser for the AI".
+  #
+  # Its network is its own. The browser goes wherever a page or the model sends
+  # it, so it is kept off db-network (it must never reach MongoDB) and off
+  # clawdia-network (nor the dashboard or RSSHub). The bot joins browser-network
+  # to reach it; that is the only other container on it.
+  playwright:
+    profiles: [browser]
+    # Digest-pinned like every other third-party image (#644). The tag is the
+    # @playwright/mcp release; bump both together.
+    image: mcr.microsoft.com/playwright/mcp:v0.0.83@sha256:690763cbb437ee7233f538a953bb5390bf03791eb5c965b471e59d17a6132fcb
+    container_name: clawdia-playwright
+    restart: unless-stopped
+    init: true
+    # Appended to the image entrypoint, which already runs headless Chromium.
+    #   --isolated       a fresh in-memory profile per session: no cookies or
+    #                    logins outlive the session, or leak between guilds
+    #   --host 0.0.0.0   listen on the network, not only inside the container
+    #   --allowed-hosts  the server refuses any Host header but the ones listed
+    #                    (DNS-rebinding protection), and the bot sends this one.
+    #                    The port is part of it.
+    command: ["--isolated", "--host", "0.0.0.0", "--port", "8931", "--allowed-hosts", "playwright:8931"]
+    # No published port: the bot is the only client. Docker Desktop users who
+    # want to poke at it from the host can add "127.0.0.1:8931:8931".
+    networks:
+      - browser-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+        reservations:
+          memory: 256m
+    stop_grace_period: 15s
+
 # Host files mounted read-only at /run/secrets/<name> inside the container.
 # Keep ./secrets/ out of git (it already is, via .gitignore) and chmod 0400 the
 # files. Uncomment alongside the service block above.
@@ -906,3 +1002,7 @@ networks:
   db-network:
     driver: bridge
     internal: true  # no external gateway — MongoDB cannot initiate outbound connections
+  # The bot and the optional `playwright` browser, and nobody else. Not internal:
+  # the browser needs the internet. Empty unless the browser profile is up.
+  browser-network:
+    driver: bridge

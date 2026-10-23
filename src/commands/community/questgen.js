@@ -168,7 +168,7 @@ Create a legendary quest that feels fitting for their journey so far.`;
 
         let parsed;
         try {
-            const config = resolveProviderConfig(guildSettings.ai);
+            const config = resolveProviderConfig(guildSettings.ai, { guildId: interaction.guild.id });
             // Provider-native structured output where the provider supports it,
             // with utils/modelJson's fence-stripping, budget-growing retry as the
             // fallback where it does not (#1044). Tools stay off on both paths;

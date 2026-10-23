@@ -240,8 +240,9 @@ describe('the notes say what actually happened to the coins', () => {
 const PET = path.join(__dirname, '..', 'src', 'commands', 'economy', 'pet');
 const read = rel => fs.readFileSync(path.join(PET, rel), 'utf8');
 
-describe('battle.js pays and refunds through the keyed helpers', () => {
-    const src = () => read('battle.js');
+// The member battle moved from battle.js to pvp.js in #1184.
+describe('pvp.js pays and refunds through the keyed helpers', () => {
+    const src = () => read('pvp.js');
 
     test('the winner payout goes through payBattleWinner, not a bare $inc', () => {
         expect(src()).toMatch(/payBattleWinner\(/);

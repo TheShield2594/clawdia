@@ -358,6 +358,31 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
             'ai.eventCommentary': document.getElementById('ai-event-commentary').checked,
             'ai.taskModeEnabled': document.getElementById('ai-task-mode').checked,
+            'ai.memory.autoSave': document.getElementById('ai-memory-autosave').checked,
+            'ai.memory.cap': Math.min(50, Math.max(1, parseInt(document.getElementById('ai-memory-cap').value, 10) || 10)),
+            'ai.learningEnabled': document.getElementById('ai-learning').checked,
+            'ai.webSearchEnabled': document.getElementById('ai-web-search').checked,
+            'ai.conversationSearch': document.getElementById('ai-conversation-search').checked,
+            'ai.voiceTranscription': document.getElementById('ai-voice-transcription').checked,
+            'ai.voiceReplies': document.getElementById('ai-voice-replies').value,
+            'ai.imageGeneration': document.getElementById('ai-image-generation').checked,
+            'ai.imageService': document.getElementById('ai-image-service').value,
+            // Empty is "use the default", saved as null rather than ''.
+            'ai.imageModels.openai': document.getElementById('ai-image-model-openai').value.trim() || null,
+            'ai.imageModels.gemini': document.getElementById('ai-image-model-gemini').value.trim() || null,
+            'ai.imageModels.openrouter': document.getElementById('ai-image-model-openrouter').value.trim() || null,
+            'ai.imageModels.higgsfield': document.getElementById('ai-image-model-higgsfield').value.trim() || null,
+            // Write-only, like the provider keys: sent only when something was typed.
+            ...(document.getElementById('ai-higgsfield-key').value.trim() ? {'ai.higgsfieldKey': document.getElementById('ai-higgsfield-key').value.trim()} : {}),
+            // Empty provider rows are dropped, so "None" in the first row and a
+            // provider in the second still saves as a one-item list.
+            'ai.fallbacks': [1, 2]
+                .map(function(n) {
+                    var provider = document.getElementById('ai-fallback-' + n + '-provider').value;
+                    var model = document.getElementById('ai-fallback-' + n + '-model').value.trim();
+                    return provider ? { provider: provider, model: model || null } : null;
+                })
+                .filter(Boolean),
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.

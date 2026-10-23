@@ -71,8 +71,10 @@ services:
     # mongodb_data volume; the image skips initialization when data exists. To
     # enable auth on a deployment that already has data, see "Enabling MongoDB
     # authentication" in docs/SETUP_GUIDE.md — a few mongosh commands, not a wipe.
-    # Left unset, everything behaves exactly as before (no auth), so existing
-    # deployments keep starting; new ones should set all four.
+    # Left unset, mongod runs without auth — and since #1151 the bot refuses to
+    # start in production against a credential-less MONGODB_URI, so set all
+    # four. MONGODB_ALLOW_NO_AUTH=true below is the deliberate opt-out for an
+    # operator who accepts running without auth.
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
@@ -340,7 +342,19 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Which servers may spend the four keys above (#1147): guild IDs, or `*`.
+      # Empty means none. The ceilings bound that spend; see .env.example.
+      - AI_ENV_KEY_GUILDS=${AI_ENV_KEY_GUILDS:-}
+      - AI_ENV_KEY_USER_LIMIT=${AI_ENV_KEY_USER_LIMIT:-}
+      - AI_ENV_KEY_MONTHLY_COST=${AI_ENV_KEY_MONTHLY_COST:-}
+      - AI_ENV_KEY_MONTHLY_TOKENS=${AI_ENV_KEY_MONTHLY_TOKENS:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      # SearXNG for the AI's web_search tool; see .env.example.
+      - SEARXNG_URL=${SEARXNG_URL:-}
+      # The server whose admins may talk to the AI by DM; see .env.example.
+      - AI_DM_GUILD_ID=${AI_DM_GUILD_ID:-}
+      # The Gemini model for spoken replies; see .env.example.
+      - GEMINI_TTS_MODEL=${GEMINI_TTS_MODEL:-}
       # Encrypts the per-server AI provider keys admins enter in the dashboard,
       # so the nightly dumps in the backups volume hold ciphertext rather than
       # live credentials (#564). Generate with `openssl rand -base64 32`, and
@@ -357,6 +371,10 @@ services:
       # renaming it does not move data, it just points the bot at an empty
       # database. Change it only alongside a dump-and-restore into the new name.
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
+      # A production bot refuses a MONGODB_URI with no credentials (#1151).
+      # `true` accepts running MongoDB without authentication on purpose, and
+      # downgrades that refusal to a warning. See the mongodb service above.
+      - MONGODB_ALLOW_NO_AUTH=${MONGODB_ALLOW_NO_AUTH:-}
       # The port *inside* the container, which is also what the image
       # EXPOSEs and what its own HEALTHCHECK probes. The host-side port is
       # the `ports:` mapping below and is a separate choice.
@@ -372,6 +390,11 @@ services:
       # impossible backup abort the boot instead. Override to `skip` only if
       # you are taking the dump yourself.
       - MIGRATION_BACKUP=${MIGRATION_BACKUP:-require}
+      # The same passphrase the backup service seals its archives with. The
+      # pre-migration dump lands in that same directory, and without this it is
+      # the one plaintext copy of the database there (#1150). Leave it empty
+      # exactly when the backup service's is empty.
+      - BACKUP_ENCRYPTION_PASSPHRASE=${BACKUP_ENCRYPTION_PASSPHRASE:-}
       #
       # --- Secrets as files (recommended) ---------------------------------
       # Uncomment these *and* the matching `secrets:` entries below, then leave
@@ -547,6 +570,10 @@ services:
     # tests/stackEntrypointShell.test.js fails on the next one.
     entrypoint: >
       sh -c '
+        # Every file this writes is a copy of the database or says where one
+        # is, so none of them is readable by anyone but root (#1161). Without
+        # this, a plain archive landed 0644 in a directory on the host.
+        umask 077;
         if [ -n "$$MONGODB_URI_FILE" ]; then
           if [ ! -r "$$MONGODB_URI_FILE" ]; then
             echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
@@ -560,6 +587,28 @@ services:
         fi;
         if [ -z "$$MONGODB_URI" ]; then
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
+        fi;
+        # mongodump and mongorestore get the URI from a 0600 --config file and
+        # not from --uri: argv is readable from the host by any user, with no
+        # access to this container at all, and once the URI carries a password
+        # that is the password (#1156). Written once, into this container own
+        # /tmp, as a YAML double-quoted scalar with backslash and double quote
+        # escaped. scripts/lib/mongotools.sh writes the same file for the
+        # scripts run by hand.
+        if ! TOOLS_CONFIG=$$(mktemp); then
+          echo "[backup] Could not create the mongo tools config file"; exit 1;
+        fi;
+        # Removed however this ends, a failed write below included, so the
+        # password does not outlive the loop in the stopped container layer.
+        # As PID 1, sh ignores SIGTERM unless it is trapped, so `docker stop`
+        # would otherwise kill it outright and skip the EXIT trap; the sleep
+        # below is backgrounded and waited on for the same reason, since a
+        # trap is not run while a foreground command is still going.
+        remove_tools_config() { rm -f -- "$$TOOLS_CONFIG"; };
+        trap remove_tools_config EXIT;
+        trap "exit 143" TERM INT;
+        if ! printf "uri: \"%s\"\n" "$$(printf "%s" "$$MONGODB_URI" | sed -e "s/[\\\\\"]/\\\\&/g")" > "$$TOOLS_CONFIG"; then
+          echo "[backup] Could not write the mongo tools config file"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
         # The passphrase the archives are sealed with (#886). `mongodump --gzip`
@@ -642,9 +691,9 @@ services:
         prune() {
           # Prunes the old ultrabot-* prefix too, so archives written before the
           # rename are still aged out instead of accumulating forever. The bot
-          # lands pre-migration-*.gz in the same volume; those are pruned
+          # lands pre-migration-*.gz (.gz.enc when sealed) in the same volume; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" -o -name "clawdia-*.gz.enc.tag" -o -name "pre-migration-*.gz.enc.tag" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
@@ -662,7 +711,7 @@ services:
             WORK=/tmp/clawdia-$$TIMESTAMP.gz;
           fi;
           echo "[backup] Starting backup at $$TIMESTAMP";
-          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$WORK"; then
+          if ! mongodump --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK"; then
             # mongodump has no rollback: a dump killed part-way through leaves
             # whatever it had written under the real name. Left there, that
             # partial file is what the boot catch-up counts as the backup for
@@ -704,15 +753,32 @@ services:
               return 1;
             fi;
             rm -f "$$WORK";
+            # The tag restore.sh and verify-backup.sh check before decrypting,
+            # so a substituted or altered archive is refused rather than
+            # restored over the database (#1161). SHA-256 of the ciphertext,
+            # encrypted under a key from the passphrase and a fixed salt: a MAC
+            # built with -pass env:, because openssl only takes an HMAC key on
+            # the command line. Must match scripts/lib/archive.sh archive_tag.
+            TAG=$$(openssl dgst -sha256 -binary "$$ARCHIVE" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S 636c61776469616d -pass env:BACKUP_ENCRYPTION_PASSPHRASE | od -An -v -tx1 | tr -d " \n" | sed "s/^53616c7465645f5f[0-9a-f]\{16\}//");
+            # OpenSSL 1.1.1 prefixes Salted__ and the salt even with -S; 3.x
+            # does not. Stripped so the tag is the same on either.
+            # A tag that cannot be written leaves an archive restore refuses,
+            # so that is a failed run like an empty tag, not a success.
+            if [ -z "$$TAG" ] || ! printf "%s\n" "$$TAG" > "$$ARCHIVE.tag"; then
+              rm -f "$$ARCHIVE" "$$ARCHIVE.tag";
+              echo "encrypt-failed $$TIMESTAMP" > "$$STATUS";
+              notify "archive $$TIMESTAMP could not be tagged; nothing was kept for it";
+              return 1;
+            fi;
             if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$ARCHIVE" -out "$$WORK"; then
               mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-              rm -f "$$WORK";
+              rm -f "$$WORK" "$$ARCHIVE.tag";
               echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
               notify "archive $$TIMESTAMP did not decrypt back; kept as $$ARCHIVE.unverified and not counted as a backup";
               return 1;
             fi;
           fi;
-          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$WORK" --dryRun --quiet; then
+          if ! mongorestore --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK" --dryRun --quiet; then
             # Renamed rather than kept or deleted. Kept under its own name, an
             # unreadable archive is what --latest picks up and what the boot
             # catch-up counts as the backup for that day; deleted, an operator
@@ -721,7 +787,7 @@ services:
             # --dryRun too). The suffix keeps it off both globs and inside the
             # prune.
             mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-            rm -f "$$WORK";
+            rm -f "$$WORK" "$$ARCHIVE.tag";
             echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
             notify "archive $$TIMESTAMP did not parse back; kept as $$ARCHIVE.unverified and not counted as a backup";
             return 1;
@@ -751,7 +817,7 @@ services:
           if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
           SLEEP=$$(( $$TARGET - $$NOW ));
           echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-          sleep $$SLEEP;
+          sleep $$SLEEP & wait $$!;
           run_backup || true;
           prune;
         done'

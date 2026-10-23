@@ -9,6 +9,7 @@ const { findShopRow } = require('../../../utils/itemDisplay');
 const { withUserLock } = require('../../../utils/userMutex');
 const { grantItemsOrOwe } = require('../../../utils/creditOrOwe');
 const { useRoleRefundPayoutKey } = require('../../../utils/payoutKey');
+const { sensitivePermissionsOf, grantableRole } = require('../../../utils/sensitiveRolePermissions');
 const COLORS = require('../../../utils/embedColors');
 const { leftField } = require('./status');
 
@@ -40,6 +41,16 @@ async function useShopItem({ interaction, userFilter, canonicalId, item, itemNam
             if (!member) {
                 return interaction.editReply({
                     content: `Couldn't check your roles just now, so nothing was used. Try again in a moment.`,
+                });
+            }
+            // Never hand out a role carrying admin or moderator permissions
+            // (#1141), whatever the shop says; refused before the item is spent.
+            const itemRole = interaction.guild.roles.cache.get(shopItem.roleId);
+            if (itemRole && sensitivePermissionsOf(itemRole.permissions).length) {
+                grantableRole(interaction.guild, shopItem.roleId, 'use', interaction.user.id); // logs the refusal
+                return interaction.editReply({
+                    content: `**${shopItem.name ?? item.name}** grants a role with moderator or admin permissions, so it can't be used. Nothing was used — let an admin know.`,
+                    allowedMentions: { parse: [] },
                 });
             }
             if (member.roles.cache.has(shopItem.roleId)) {

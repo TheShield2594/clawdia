@@ -34,7 +34,8 @@ async function logModeration(guildId, action, target, moderator, reason, options
 
         if (guildSettings?.moderation?.logChannelId) {
             const channel = moderator.client.channels.cache.get(guildSettings.moderation.logChannelId);
-            if (channel) {
+            // The cache spans every guild the bot is in; only this guild's own log channel (#1140).
+            if (channel && channel.guildId === guildId) {
                 const colors = {
                     ban: '#ff0000',
                     kick: '#ff9900',

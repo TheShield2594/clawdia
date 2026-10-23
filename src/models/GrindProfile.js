@@ -48,6 +48,9 @@ grindProfileSchema.index({ guildId: 1, system: 1, 'data.legendaryKills': -1 });
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.eventKills': -1 });
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.prestige': -1, 'data.level': -1 });
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.totalHunts': -1 });
+// The /explore go result card's record marker (utils/grindRecord). The mine's
+// record reads data.bestPayout, which the index above already serves.
+grindProfileSchema.index({ guildId: 1, system: 1, 'data.bestHaul': -1 });
 // All-time grind leaderboard (#1016): highest track level first, lifetime coins
 // (`data.totalEarned`) as the tiebreak. Serves the bounded top-10 sort in
 // utils/grindLeaderboard.js so the board is an index scan, not a collection sort.

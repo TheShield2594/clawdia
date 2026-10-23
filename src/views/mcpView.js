@@ -56,11 +56,15 @@ function describeConfirm(mode) {
 /**
  * The route line, or null for a provider that only ever had one route.
  *
- * `auto` is a question rather than an answer, so it is shown resolved.
+ * `auto` is a question rather than an answer, so it is shown resolved — and so
+ * is `connector` when approvals or an OAuth connection override it (#1149).
  */
 function describeRoute(provider, route, effective) {
     if (provider !== 'anthropic') return null;
-    const resolved = route === 'auto' ? `auto → ${effective}` : route;
+    const resolved = route !== effective ? `${route} → ${effective}` : route;
+    if (route === 'connector' && effective === 'client') {
+        return `Route: ${resolved} — Clawdia makes the calls, because approvals (or an OAuth connection) cannot work through Anthropic's connector`;
+    }
     return effective === 'connector'
         ? `Route: ${resolved} — Anthropic opens the connections, so approvals and activity do not apply`
         : `Route: ${resolved} — Clawdia makes the calls`;
@@ -78,6 +82,7 @@ function serversEmbed(view) {
         if (server.allowedTools?.length) bits.push(`only ${server.allowedTools.length}`);
         if (server.blockedTools?.length) bits.push(`${server.blockedTools.length} blocked`);
         if (server.confirmTools?.length) bits.push(`${server.confirmTools.length} need approval`);
+        if (server.unattendedTools?.length) bits.push(`${server.unattendedTools.length} run in scheduled tasks`);
         return `**${toolLabel(server.name)}**${bits.length ? ` — ${bits.join(', ')}` : ''}`;
     });
 

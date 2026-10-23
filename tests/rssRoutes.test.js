@@ -26,11 +26,22 @@ const Guild = require('../src/models/Guild');
 const { safeFetchFeed } = require('../src/utils/safeFeedFetch');
 const rss = require('../src/dashboard/routes/api/rss');
 const { rssFeedRows } = require('../src/dashboard/lib/rssFeedRows');
+const stubBotGateway = require('./helpers/stubBotGateway');
 
 const FEED_XML = '<?xml version="1.0"?><rss version="2.0"><channel><title>B Feed</title></channel></rss>';
 
 const CHANNEL_ID = '111222333444555666';
 const feed = name => ({ url: `https://${name}.example/feed.xml`, channelId: CHANNEL_ID });
+const SECOND_CHANNEL_ID = '999888777666555444';
+const OTHER_GUILD_CHANNEL_ID = '777666555444333222';
+const GUILD_ROLE_ID = '222333444555666777';
+
+// g1 owns its two channels and GUILD_ROLE_ID; anything else is another server's (#1140).
+const bot = stubBotGateway({
+    hasChannel: jest.fn(async (guildId, channelId) =>
+        guildId === 'g1' && [CHANNEL_ID, SECOND_CHANNEL_ID].includes(channelId)),
+    listRoles: jest.fn(async guildId => (guildId === 'g1' ? [{ id: GUILD_ROLE_ID, name: 'News', dangerousPermissions: [] }] : [])),
+});
 
 let app;
 let doc;
@@ -49,6 +60,7 @@ beforeEach(() => {
 
     app = express();
     app.use(express.json());
+    app.use((req, _res, next) => { req.bot = bot; next(); });
     app.use('/api/v1', rss);
 });
 
@@ -58,6 +70,14 @@ const addFeed = body => request(app).post('/api/v1/guild/g1/rss/add').send(body)
 const deleteFeed = index => request(app).delete(`/api/v1/guild/g1/rss/${index}`);
 
 describe('POST /guild/:guildId/rss/add', () => {
+    it('refuses a channel from another server, before fetching anything (#1140)', async () => {
+        const res = await addFeed({ url: 'https://b.example/feed.xml', channelId: OTHER_GUILD_CHANNEL_ID });
+
+        expect(res.status).toBe(400);
+        expect(safeFetchFeed).not.toHaveBeenCalled();
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
     it('stores the feed and answers with the whole list', async () => {
         doc = makeDoc([feed('a')]);
         Guild.findOne.mockResolvedValue(doc);
@@ -145,7 +165,7 @@ describe('POST /guild/:guildId/rss/add', () => {
 });
 
 describe('PATCH /guild/:guildId/rss/:index', () => {
-    const ROLE_ID = '222333444555666777';
+    const ROLE_ID = GUILD_ROLE_ID;
     const patchFeed = (index, body) => request(app).patch(`/api/v1/guild/g1/rss/${index}`).send(body);
 
     beforeEach(() => {
@@ -197,6 +217,8 @@ describe('PATCH /guild/:guildId/rss/:index', () => {
         ['an over-long keyword', { includeKeywords: ['x'.repeat(61)] }],
         ['a role that is not an ID', { mentionRoleId: 'admins' }],
         ['the @everyone role', { mentionRoleId: '123456789012345678' }],
+        // Another guild's ID is that guild's @everyone role (#1140).
+        ['a role from another server', { mentionRoleId: '876543210987654321' }],
         ['an over-long message', { messageTemplate: 'x'.repeat(501) }],
         ['a message that is not text', { messageTemplate: { $gt: '' } }],
     ])('refuses %s', async (_label, body) => {

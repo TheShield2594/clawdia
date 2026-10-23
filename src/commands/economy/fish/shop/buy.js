@@ -52,7 +52,7 @@ function unresolvedMessage(currency, amount) {
 // component interaction it hands in answers with its own ephemeral confirm.
 async function handleBuy(interaction, user, currency, override = {}) {
     const itemId   = override.itemId ?? interaction.options.getString('item');
-    const quantity = override.quantity ?? interaction.options.getInteger('quantity') ?? 1;
+    const quantity = override.quantity ?? interaction.options?.getInteger('quantity') ?? 1;
     const f        = user.fishing;
 
     const baitPack   = BAIT_PACKS.find(p => p.id === itemId);

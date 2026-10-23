@@ -107,6 +107,32 @@ beforeEach(() => {
     mockRetrieveMcpKnowledge.mockResolvedValue(null);
 });
 
+// A member without Manage Server reaches only the connections that are not
+// somebody's own account; the list every route reads is marked for that.
+describe('which connections the turn can reach', () => {
+    const { isMemberList } = require('../src/config/mcpServers');
+    const asker = canManage => {
+        const { message } = fakeMessage();
+        message.member = { permissions: { has: perm => canManage && perm === 'ManageGuild' } };
+        return message;
+    };
+
+    beforeEach(() => {
+        mockStream.mockImplementation(async function* () { yield 'ok'; });
+    });
+
+    test('a member\'s turn, and its resource lookup, get the member\'s list', async () => {
+        await handleAIChat(asker(false), SETTINGS);
+        expect(isMemberList(mockStream.mock.calls[0][0].mcpServers)).toBe(true);
+        expect(isMemberList(mockRetrieveMcpKnowledge.mock.calls[0][0])).toBe(true);
+    });
+
+    test('a manager\'s turn gets every connection', async () => {
+        await handleAIChat(asker(true), SETTINGS);
+        expect(isMemberList(mockStream.mock.calls[0][0].mcpServers)).toBe(false);
+    });
+});
+
 describe('while a tool is running', () => {
     test('the reply says which tool it is waiting on', async () => {
         mockStream.mockImplementation(async function* (args) {
@@ -163,7 +189,7 @@ describe('the summary on the finished reply', () => {
         expect(message.channel.send).not.toHaveBeenCalled();
     });
 
-    test('reports a server that could not be reached, even with nothing called', async () => {
+    test('says nothing about a server that could not be reached when nothing was called', async () => {
         mockStream.mockImplementation(async function* (args) {
             args.onToolEvent({ type: 'unavailable', server: 'github', error: 'HTTP 401' });
             yield 'I could not check.';
@@ -172,7 +198,7 @@ describe('the summary on the finished reply', () => {
         const { message, sent } = fakeMessage();
         await handleAIChat(message, SETTINGS);
 
-        expect(sent[0].content).toContain('⚠️ github unreachable');
+        expect(sent[0].content).toBe('I could not check.');
     });
 
     test('never reaches the history the model is given next time', async () => {
@@ -186,9 +212,9 @@ describe('the summary on the finished reply', () => {
         await handleAIChat(message, SETTINGS);
 
         expect(mockAppendHistory).toHaveBeenCalledWith(
-            // The trailing argument is the summarizer for the turns this write
-            // may trim away (#833).
-            'g1', 'c1', 'u1', 'what changed in the repo?', 'Three open PRs.', 20, expect.anything()
+            // The summarizer for the turns this write may trim away (#833), and
+            // whether the turn also goes to the searchable log.
+            'g1', 'c1', 'u1', 'what changed in the repo?', 'Three open PRs.', 20, expect.anything(), { archive: false }
         );
     });
 

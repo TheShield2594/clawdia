@@ -37,8 +37,14 @@ const DATE = new Date('2025-08-20T12:00:00Z');
 
 function makeClient() {
     const send = jest.fn(async () => ({}));
-    const channel = { send, isTextBased: () => true };
-    return { channels: { fetch: jest.fn(async () => channel), cache: new Map() }, send };
+    // One channel per id, in the guild the fixtures pair it with (c1 ↔ g1):
+    // delivery refuses a channel that belongs to another guild (#1140).
+    const channels = new Map();
+    const channelFor = id => {
+        if (!channels.has(id)) channels.set(id, { send, isTextBased: () => true, guildId: `g${String(id).slice(1)}` });
+        return channels.get(id);
+    };
+    return { channels: { fetch: jest.fn(async id => channelFor(id)), cache: new Map() }, send };
 }
 
 function rss({ items, image = '', link = 'https://example.com/' }) {

@@ -23,6 +23,7 @@ const Guild = require('../models/Guild');
 const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
+const { feedUrlLabel } = require('../utils/feedUrlLabel');
 const { handlesGuild } = require('../utils/sharding');
 const { getProvider, getBridgeOrigin, twitterBridgeFeedUrl, X_USERNAME } = require('./socialProviders');
 const { fetchTweetDetails, fetchProfileTimeline, isXApiEnabled, formatDuration } = require('./xEnrichment');
@@ -63,10 +64,10 @@ function shouldSkipDeadFeed(feedUrl) {
 
     const lastFail = feedLastFailTime.get(feedUrl) || 0;
     if (Date.now() - lastFail < DEAD_FEED_COOLDOWN_MS) {
-        console.warn(`[Social] Skipping dead source (${failCount} consecutive failures): ${feedUrl}`);
+        console.warn(`[Social] Skipping dead source (${failCount} consecutive failures): ${feedUrlLabel(feedUrl)}`);
         return true;
     }
-    console.log(`[Social] Retrying previously dead source after cooldown: ${feedUrl}`);
+    console.log(`[Social] Retrying previously dead source after cooldown: ${feedUrlLabel(feedUrl)}`);
     return false;
 }
 
@@ -80,9 +81,9 @@ function recordFeedFailure(feedUrl, error) {
     feedFailCounts.set(feedUrl, newCount);
     feedLastFailTime.set(feedUrl, Date.now());
     if (newCount >= DEAD_FEED_THRESHOLD) {
-        console.error(`[Social] Source marked dead after ${newCount} consecutive failures: ${feedUrl}`);
+        console.error(`[Social] Source marked dead after ${newCount} consecutive failures: ${feedUrlLabel(feedUrl)}`);
     } else {
-        console.error(`[Social] Error parsing source (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
+        console.error(`[Social] Error parsing source (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrlLabel(feedUrl)}:`, error.message);
     }
 }
 
@@ -112,7 +113,9 @@ function datedItems(parsedFeed) {
         .sort((a, b) => a.date - b.date);
 }
 
-async function fetchSendableChannel(client, channelId) {
+// Refuses a channel outside `guildId`: `channels.fetch` resolves an id in any
+// guild the bot is in (#1140).
+async function fetchSendableChannel(client, channelId, guildId) {
     let channel;
     try {
         channel = await client.channels.fetch(channelId);
@@ -121,6 +124,7 @@ async function fetchSendableChannel(client, channelId) {
     }
     if (!channel || typeof channel.send !== 'function') return null;
     if (typeof channel.isTextBased === 'function' && !channel.isTextBased()) return null;
+    if (channel.guildId !== guildId) return null;
     return channel;
 }
 
@@ -439,7 +443,7 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
     let cursor = null;
 
     try {
-        const channel = await fetchSendableChannel(client, feed.channelId);
+        const channel = await fetchSendableChannel(client, feed.channelId, guild.guildId);
         // No channel is not a delivery: advancing here would drop the burst for
         // good on a channel that was only briefly unreachable.
         if (!channel) return 0;
@@ -468,7 +472,7 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
                 { $set: { 'socialFeeds.$.lastPublished': cursor } }
             );
         } catch (error) {
-            console.error(`[Social] Error advancing the cursor for ${feed.feedUrl} in guild ${guild.guildId}:`, error);
+            console.error(`[Social] Error advancing the cursor for ${feedUrlLabel(feed.feedUrl)} in guild ${guild.guildId}:`, error);
         }
     }
 

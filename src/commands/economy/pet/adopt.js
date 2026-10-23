@@ -4,7 +4,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../../models/User');
 const {
     PET_DEFINITIONS, PERSONALITY_TRAITS, STARVING_THRESHOLD,
-    createPet, hasFreePetSlot, petCapacity, countSlotPets,
+    createPet, joinVacation, noteCodex, hasFreePetSlot, petCapacity, countSlotPets, sanitizePetName, formatPetBonus,
 } = require('../../../services/petService');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isVersionError } = require('../../../utils/versionRetry');
@@ -15,8 +15,13 @@ const { resolveUser, collectPetAchievements, announcePetAchievements } = require
 
 async function executeAdopt(interaction) {
     const petId = interaction.options.getString('type');
-    const petName = interaction.options.getString('name')?.trim().slice(0, 32) ?? null;
+    const rawName = interaction.options.getString('name');
+    const petName = rawName == null ? null : sanitizePetName(rawName);
     const def   = PET_DEFINITIONS[petId];
+
+    if (rawName != null && !petName) {
+        return interaction.reply({ content: 'That name has nothing left once mentions and formatting characters are taken out — try letters, numbers or emoji.', flags: MessageFlags.Ephemeral });
+    }
 
     if (!def) return interaction.reply({ content: 'Unknown pet type.', flags: MessageFlags.Ephemeral });
     if (!def.purchasable) {
@@ -64,8 +69,10 @@ async function executeAdopt(interaction) {
     user.balance = charged.balance;
     user.unmarkModified('balance');
 
-    const newPet = createPet(petId, { name: petName });
+    // A pet adopted mid-vacation joins it, so the pause covers every pet (#1181).
+    const newPet = joinVacation(user, createPet(petId, { name: petName }));
     user.pets.push(newPet);
+    noteCodex(user, petId);
     user.markModified('pets');
     const personality = newPet.personality;
 
@@ -99,7 +106,7 @@ async function executeAdopt(interaction) {
             `${personalityDef.emoji} **Personality: ${personalityDef.label}** — *${personalityDef.desc}*`
         )
         .addFields(
-            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
+            { name: 'Passive Bonus',  value: `${formatPetBonus(def.bonusType, def.bonusPct)} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
             { name: 'Favorite Food',  value: `\`${def.favoriteMaterial}\` (restores 25 hunger)`,                                  inline: true },
             { name: 'Cost',           value: `${def.cost.toLocaleString()} ${currency}`,                                           inline: true },
         )

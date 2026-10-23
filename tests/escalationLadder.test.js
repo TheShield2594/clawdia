@@ -45,9 +45,16 @@ const LADDER = [
     { threshold: 9, action: 'ban' },
 ];
 
+// Role positions for the hierarchy check (#1144): the warning moderator sits
+// above the target unless a test says otherwise.
+const rank = position => ({ highest: { position, comparePositionTo: other => position - other.position } });
+const moderator = (position = 10) => ({ id: 'mod1', guild: { ownerId: 'owner1' }, roles: rank(position) });
+
 function member(over = {}) {
     return {
         id: 'u1',
+        guild: { ownerId: 'owner1' },
+        roles: rank(1),
         moderatable: true, kickable: true, bannable: true,
         timeout: jest.fn(async () => {}),
         kick:    jest.fn(async () => {}),
@@ -55,11 +62,22 @@ function member(over = {}) {
     };
 }
 
-function fakeGuild({ theMember = member(), channel = null } = {}) {
+// Discord's answer for someone who is not in the guild, which resolveMember
+// reads as a confirmed absence rather than a failed lookup.
+const unknownMember = () => Object.assign(new Error('Unknown Member'), { code: 10007 });
+
+function fakeGuild({ theMember = member(), channel = null, fetchError = null } = {}) {
     return {
         id: 'g1',
         name: 'Guild One',
-        members: { fetch: jest.fn(async () => theMember), ban: jest.fn(async () => {}) },
+        members: {
+            fetch: jest.fn(async () => {
+                if (fetchError) throw fetchError;
+                if (!theMember) throw unknownMember();
+                return theMember;
+            }),
+            ban: jest.fn(async () => {}),
+        },
         channels: { cache: new Map(channel ? [['log1', channel]] : []) },
     };
 }
@@ -68,7 +86,7 @@ const targetUser = () => ({ id: 'u1', username: 'Ada', send: jest.fn(async () =>
 const client = { user: { id: 'bot1', username: 'Clawdia' } };
 
 const apply = (over = {}) => applyEscalation({
-    guild: fakeGuild(), targetUser: targetUser(), warningCount: 3, client, ...over,
+    guild: fakeGuild(), targetUser: targetUser(), warningCount: 3, client, moderator: moderator(), ...over,
 });
 
 let errorLog;
@@ -179,8 +197,7 @@ describe('applying a rung', () => {
     });
 
     test('bans through the guild, so it works on a user who has already left', async () => {
-        const guild = fakeGuild();
-        guild.members.fetch.mockResolvedValue(null);
+        const guild = fakeGuild({ theMember: null });
 
         const result = await apply({ guild, warningCount: 9 });
 
@@ -235,6 +252,48 @@ describe('rungs that cannot be applied', () => {
         // No case, because nothing happened. A case here is a record of a
         // punishment the user never received.
         expect(createCase).not.toHaveBeenCalled();
+    });
+
+    // #1144: the rung runs on the warning moderator's authority, so it must not
+    // do what that moderator could not do directly with /mute, /kick or /ban.
+    test.each([
+        ['mute', 3], ['kick', 5], ['tempban', 7], ['ban', 9],
+    ])('skips a %s rung on a member the warning moderator does not outrank', async (_action, warningCount) => {
+        const m = member({ roles: rank(10) });
+        const user = targetUser();
+        const guild = fakeGuild({ theMember: m });
+
+        const result = await apply({ guild, targetUser: user, warningCount, moderator: moderator(10) });
+
+        expect(result).toMatchObject({ skipped: true, reason: expect.stringMatching(/does not outrank/) });
+        expect(m.timeout).not.toHaveBeenCalled();
+        expect(m.kick).not.toHaveBeenCalled();
+        expect(guild.members.ban).not.toHaveBeenCalled();
+        expect(TempBan.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(createCase).not.toHaveBeenCalled();
+        // No "you have been auto-muted" DM for a punishment that did not happen.
+        expect(user.send).not.toHaveBeenCalled();
+    });
+
+    test('with no moderator to compare against, it fails closed', async () => {
+        const m = member();
+        const result = await apply({ guild: fakeGuild({ theMember: m }), moderator: undefined });
+
+        expect(result.skipped).toBe(true);
+        expect(m.timeout).not.toHaveBeenCalled();
+    });
+
+    // The ban rungs proceed on an absent member (ban-by-id). A rate-limited
+    // lookup is not an absent member, and reading it as one would skip both
+    // the bannable check and the hierarchy check.
+    test.each([['ban', 9], ['tempban', 7]])('skips a %s rung when the member lookup fails', async (_action, warningCount) => {
+        const guild = fakeGuild({ fetchError: Object.assign(new Error('rate limited'), { status: 429 }) });
+
+        const result = await apply({ guild, warningCount });
+
+        expect(result).toMatchObject({ skipped: true, reason: expect.stringMatching(/Could not look/) });
+        expect(guild.members.ban).not.toHaveBeenCalled();
+        expect(TempBan.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
     test('skips a tempban rung configured with no duration', async () => {

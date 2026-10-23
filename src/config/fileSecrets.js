@@ -41,6 +41,9 @@ const FILE_BACKED_SECRETS = [
     // can ban, unban and post in every guild the bot is in, so it belongs here
     // for the same reason CLIENT_SECRET does.
     'BOT_GATEWAY_TOKEN',
+    // Seals the pre-migration dump (#1150) — the same passphrase the backup
+    // service seals the nightly archives with, and it opens all of them.
+    'BACKUP_ENCRYPTION_PASSPHRASE',
 ];
 
 /**

@@ -16,12 +16,75 @@
 # not have. What CBC costs is tamper *detection*: an altered archive decrypts to
 # garbage rather than refusing to open. The backup service parses every sealed
 # archive back on the night it is taken, which is where an unreadable one is
-# found; what neither catches is a deliberate, valid-looking substitution, and
-# an archive store where that is the threat wants a signature, not a cipher mode.
+# found; what neither catches is a deliberate, valid-looking substitution.
+#
+# That is what the tag is for (#1161). Every sealed archive gets a sidecar
+# `<archive>.tag`, a MAC over the ciphertext keyed by the same passphrase, and
+# `open_archive` refuses an archive whose tag is missing or does not match
+# before anything is decrypted — so a substituted or edited archive is caught
+# here rather than by `mongorestore --drop` over the live database.
+#
+# The tag is SHA-256 of the ciphertext, encrypted (AES-256-CBC) under a key
+# derived from the passphrase with a fixed salt, and compared rather than
+# decrypted. That is hash-then-PRF, a MAC, built from the one tool already
+# here: `openssl dgst -hmac` and `openssl mac` only take their key on the
+# command line, which is readable from the host by anyone, and `-pass env:` is
+# how this file keeps the passphrase off it. The fixed salt keeps the tag key
+# apart from every archive key, which each come from a random salt.
+# src/migrations/runner.js computes the same tag in Node for the pre-migration
+# dump, and tests/backupArchiveEncryption.test.js holds the two to each other.
 #
 # Sourced, not run:
 #     . "$(dirname "$0")/lib/archive.sh"
 #     READABLE=$(open_archive "${ARCHIVE}" "${WORKDIR}") || exit 1
+
+# The fixed PBKDF2 salt of the tag key, as hex: "clawdiam". Must match the
+# backup service entrypoint in both stack files and runner.js ARCHIVE_TAG_SALT.
+ARCHIVE_TAG_SALT=636c61776469616d
+
+# Prints the hex tag of the sealed archive $1 (see above). OpenSSL 1.1.1 writes
+# `Salted__` and the salt ahead of the ciphertext even when the salt is given
+# with -S; 3.x does not. That header is stripped, so the tag is the encrypted
+# digest alone on either version, as runner.js computes it.
+archive_tag() {
+    openssl dgst -sha256 -binary "$1" \
+        | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S "${ARCHIVE_TAG_SALT}" \
+            -pass env:BACKUP_ENCRYPTION_PASSPHRASE \
+        | od -An -v -tx1 | tr -d ' \n' \
+        | sed 's/^53616c7465645f5f[0-9a-f]\{16\}//'
+}
+
+# Writes `$1.tag` for the sealed archive $1, mode 0600.
+write_archive_tag() {
+    local tag
+    tag=$(archive_tag "$1") || return 1
+    [ -n "${tag}" ] || return 1
+    (umask 077 && printf '%s\n' "${tag}" > "$1.tag")
+}
+
+# Whether the sealed archive $1 matches its tag. An archive sealed before tags
+# existed has none; it is refused unless BACKUP_ALLOW_UNTAGGED=true, since a
+# missing tag is exactly what a substituted archive would have too.
+verify_archive_tag() {
+    local archive="$1" expected actual
+    if [ ! -f "${archive}.tag" ]; then
+        if [ "${BACKUP_ALLOW_UNTAGGED:-}" = "true" ]; then
+            echo "[archive] WARNING: ${archive} has no .tag; opening it unauthenticated (BACKUP_ALLOW_UNTAGGED=true)." >&2
+            return 0
+        fi
+        echo "[archive] ERROR: ${archive} has no ${archive}.tag, so it cannot be checked for tampering." >&2
+        echo "[archive] Archives sealed before tags were added have none: set BACKUP_ALLOW_UNTAGGED=true" >&2
+        echo "[archive] to open one of those, once you are sure it is the file you took." >&2
+        return 1
+    fi
+    expected=$(tr -d ' \r\n' < "${archive}.tag")
+    actual=$(archive_tag "${archive}") || actual=""
+    if [ -z "${actual}" ] || [ "${expected}" != "${actual}" ]; then
+        echo "[archive] ERROR: ${archive} does not match its tag — the archive or its .tag was" >&2
+        echo "[archive] altered or substituted, or it was sealed with a different BACKUP_ENCRYPTION_PASSPHRASE." >&2
+        return 1
+    fi
+}
 
 # Whether this path names a sealed archive.
 archive_is_encrypted() {
@@ -56,6 +119,8 @@ open_archive() {
         echo "[archive] ERROR: no working directory to decrypt ${archive} into." >&2
         return 1
     fi
+
+    verify_archive_tag "${archive}" || return 1
 
     # Into the caller's private directory (mktemp -d is 0700), never beside the
     # archive: the plaintext of the whole database must not appear in the backup

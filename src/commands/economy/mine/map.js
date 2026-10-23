@@ -7,7 +7,7 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, renderMineMap, getRaidableMaterials, RAID_MAX_PER_MATERIAL } = require('../../../services/mineService');
-const { DEPTHS, MATERIAL_NAMES } = require('../../../data/mineData');
+const { DEPTHS, INTENSITY_LEVELS, MATERIAL_NAMES } = require('../../../data/mineData');
 
 // ─── MAP ──────────────────────────────────────────────────────────────────────
 
@@ -40,8 +40,11 @@ async function handleMap(interaction) {
     const total    = mapSize * mapSize;
 
     // Yield multiplier comes from the intensity the miner picks before digging, with
-    // a correct vein read promoting it one rung at the same risk.
-    const intensityHint = '0.7×–3.0×, set by the risk you choose';
+    // a good or rich seam lifting it a rung or two at the same risk. Read off the
+    // ladder so the range cannot drift from it again: it said 0.7× long after
+    // Careful moved to 0.8×.
+    const mults = INTENSITY_LEVELS.map(l => l.multiplier);
+    const intensityHint = `${Math.min(...mults).toFixed(1)}×–${Math.max(...mults).toFixed(1)}×, set by the risk you choose`;
 
     const raidableLines = getRaidableMaterials(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 

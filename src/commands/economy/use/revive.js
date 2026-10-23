@@ -4,15 +4,15 @@
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../../models/User');
-const { PET_DEFINITIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../../services/petService');
+const { PET_DEFINITIONS, petCapacity, hasFreePetSlot, countSlotPets, joinVacation } = require('../../../services/petService');
 const { leftField } = require('./status');
 
-/** Revives `deceasedPets[0]` with its level, record and bond, or says why not. */
+/** Revives `deceasedPets[0]` with its level, record and remaining bond, or says why not. */
 async function useReviveScroll({ interaction, userFilter, preview, canonicalId, dropEmptyInventorySlots }) {
     const fallen = preview.deceasedPets?.[0];
     if (!fallen) {
         return interaction.reply({
-            content: '📜 The scroll finds no one to call back — none of your pets have starved. Keep it for a rainier day.',
+            content: '📜 The scroll finds no one to call back — none of your pets have run away. Keep it for a rainier day.',
             flags: MessageFlags.Ephemeral,
         });
     }
@@ -38,16 +38,24 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
     const now = new Date();
     const revived = {
         ...(fallen.toObject ? fallen.toObject() : fallen),
-        // Comes back weak but alive: bond, level, XP and record are preserved,
-        // the starvation state is not.
+        // Comes back weak but alive: level, XP and record are preserved, and the
+        // bond it kept after the runaway penalty; the starvation state is not.
         hunger: 50,
         lastFed: now,
         lastDecayAt: now,
         starving: false,
         starvingStartAt: null,
+        // A fresh start for the hunger DMs and no leftover vacation (#1181).
+        hungerWarnedLow: false,
+        hungerWarnedEmpty: false,
+        vacationFrom: null,
+        vacationUntil: null,
     };
     delete revived._id;
     delete revived.diedAt;
+    // Coming home mid-vacation, it joins the others rather than being the one
+    // active pet while they are away.
+    joinVacation(preview, revived, now.getTime());
 
     // Consume the scroll, remove the record and bring the pet back in one
     // conditional write, so a double-click can't revive the same pet twice
@@ -89,7 +97,7 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
         .setDescription(
             `${def?.emoji ?? '🐾'} **${name}** is back at your side, weak but whole.\n\n` +
             `They kept everything: **Level ${fallen.level ?? 1}**, ` +
-            `**${fallen.battleWins ?? 0}W / ${fallen.battleLosses ?? 0}L**, and every day of your bond.`
+            `**${fallen.battleWins ?? 0}W / ${fallen.battleLosses ?? 0}L** — though running off cost some of your bond.`
         )
         .addFields(
             { name: '🍖 Hunger', value: '50% — feed them soon', inline: true },

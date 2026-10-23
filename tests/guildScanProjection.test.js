@@ -153,7 +153,7 @@ describe('the RSS feed check', () => {
         // A real sendable channel: the cursor only moves for an item that was
         // actually delivered, so a null channel now writes nothing and would
         // say nothing about the shape of the write, which is what this asserts.
-        const channel = { send: jest.fn().mockResolvedValue({}), isTextBased: () => true };
+        const channel = { send: jest.fn().mockResolvedValue({}), isTextBased: () => true, guildId: 'g1' };
         await checkRssFeeds({ channels: { fetch: jest.fn().mockResolvedValue(channel) } });
 
         expect(Guild.updateOne).toHaveBeenCalledTimes(1);

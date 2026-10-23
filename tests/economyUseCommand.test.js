@@ -302,6 +302,23 @@ describe('the revive scroll', () => {
         expect(slot('revive_scroll')).toBeUndefined();
     });
 
+    it('a pet revived mid-vacation joins it, with its warnings cleared', async () => {
+        const until = new Date(Date.now() + 3 * 86400000);
+        seedUser({
+            inventory: [{ itemId: 'revive_scroll', quantity: 1 }],
+            deceasedPets: [{ ...fallen, hungerWarnedLow: true, hungerWarnedEmpty: true }],
+            pets: [{ petId: 'wolf', vacationFrom: new Date(Date.now() - 86400000), vacationUntil: until }],
+            petSlots: 0,
+        });
+        seedGuild();
+
+        await run('revive_scroll');
+
+        const back = mockUsers.get(USER_ID).pets.find(p => p.petId === 'cat');
+        expect(new Date(back.vacationUntil).getTime()).toBe(until.getTime());
+        expect(back).toMatchObject({ hungerWarnedLow: false, hungerWarnedEmpty: false });
+    });
+
     it('refuses when the same pet is already back', async () => {
         seedUser({
             inventory: [{ itemId: 'revive_scroll', quantity: 1 }],
@@ -343,6 +360,30 @@ describe('a plain shop item', () => {
         await use.execute(interaction);
 
         expect(add).toHaveBeenCalledWith('role-9', expect.stringContaining('vip_pass'));
+    });
+
+    it('refuses a role carrying admin permissions, and spends nothing (#1141)', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const { PermissionFlagsBits } = require('discord.js');
+        const interaction = makeInteraction({
+            options: { item: 'vip_pass' },
+            roles: new Map([['role-9', { id: 'role-9', permissions: PermissionFlagsBits.Administrator }]]),
+        });
+        const add = jest.fn();
+        interaction.guild.members.fetch = jest.fn().mockResolvedValue({
+            roles: { cache: { has: () => false }, add },
+        });
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await use.execute(interaction);
+        errorSpy.mockRestore();
+
+        expect(add).not.toHaveBeenCalled();
+        expect(repliedText(interaction)).toContain("can't be used");
+        expect(slot('vip_pass').quantity).toBe(1);
+        expect(mockUsers.writes).toEqual([]);
     });
 
     it('refuses a role item the member already has, and spends nothing', async () => {

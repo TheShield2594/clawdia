@@ -80,6 +80,9 @@
               "at": { "description": "Cuándo se ejecuta por primera vez, p. ej. «09:00», «5pm», «2026-07-20 09:00»" },
               "in_minutes": { "description": "Minutos a partir de ahora en lugar de una hora absoluta" },
               "every": { "description": "Repetir con esta cadencia. Déjalo vacío para ejecutarla una vez." },
+              "cron": { "description": "Un horario cron en lugar de «every», p. ej. «0 9 * * 1-5» para los días laborables a las 9" },
+              "deliver": { "description": "Publica el resultado en un canal (por defecto) o te lo envía por MD" },
+              "deep": { "description": "Da a cada ejecución el margen del modo de tarea profunda: más rondas de herramientas y minutos" },
               "channel": { "description": "Dónde se publica el resultado. Por defecto, este canal." }
             }
           },
@@ -256,6 +259,15 @@
         "description": "(Admin) Establece o quita la apuesta máxima permitida en el casino.",
         "options": {
           "limit": { "description": "Apuesta máx. en monedas. Ponlo a 0 para sin límite." }
+        }
+      },
+      "slotsconfig": {
+        "description": "(Admin) Configura cómo se anuncia un Triple Comodín en las tragaperras.",
+        "options": {
+          "announce": { "description": "Anunciar un Triple Comodín en el canal (activado por defecto)." },
+          "ping_here": { "description": "Mencionar @here con el anuncio (desactivado por defecto)." },
+          "channel": { "description": "Dónde anunciarlo (por defecto: donde se jugó)." },
+          "clear_channel": { "description": "Volver a anunciarlo donde se jugó." }
         }
       },
       "blackjack": {
@@ -471,7 +483,8 @@
       "go": {
         "description": "Parte en una expedición. Usa 1 de energía. Enfriamiento: 60s.",
         "options": {
-          "region": { "description": "Región a explorar (por defecto, tu región activa)" }
+          "region": { "description": "Región a explorar (por defecto, tu región activa)" },
+          "route": { "description": "Cómo partes: sendero seguro, fuera del camino o tierras profundas (por defecto, la última)" }
         }
       },
       "map": { "description": "Consulta tu Mapa de Explorador: cada región, hito y secreto que has trazado." },
@@ -1054,6 +1067,12 @@
           "type": { "description": "Qué notificación cambiar" },
           "value": { "description": "Activar o desactivar la notificación" }
         }
+      },
+      "pets": {
+        "description": "Activa o desactiva los DM cuando una mascota tiene hambre o va a escaparse.",
+        "options": {
+          "value": { "description": "Activar o desactivar la notificación" }
+        }
       }
     }
   },
@@ -1073,7 +1092,8 @@
         "description": "Alimenta a una mascota; su comida favorita restaura más y da XP extra.",
         "options": {
           "material": { "description": "Qué comida usar: empieza a escribir para ver lo que tienes" },
-          "slot": { "description": "A qué mascota alimentar (por defecto, la primera)" }
+          "slot": { "description": "A qué mascota alimentar (por defecto, la primera)" },
+          "quantity": { "description": "Da hasta esta cantidad; se detiene cuando tu mascota está llena (por defecto 1)" }
         }
       },
       "release": {
@@ -1090,18 +1110,27 @@
         }
       },
       "list": { "description": "Consulta todas las mascotas disponibles en la tienda." },
+      "codex": { "description": "Todas las especies de mascota: las que has tenido y de dónde salen las raras." },
+      "vacation": {
+        "description": "Pausa el hambre de todas tus mascotas hasta 14 días (sin pasivas ni combates mientras tanto).",
+        "options": {
+          "state": { "description": "Empezar o terminar las vacaciones" },
+          "days": { "description": "Cuántos días (por defecto 14)" }
+        }
+      },
       "leaderboard": {
         "description": "Consulta las mejores mascotas de este servidor.",
         "options": {
-          "type": { "description": "Orden (por defecto: días de vínculo)" }
+          "type": { "description": "Orden (por defecto: vínculo)" }
         }
       },
       "battle": {
-        "description": "Combate contra una mascota salvaje por XP, o reta a otro miembro (opcionalmente por monedas).",
+        "description": "Lucha contra una mascota salvaje por XP, o reta a un miembro (por monedas o clasificación).",
         "options": {
           "opponent": { "description": "Miembro a retar (déjalo vacío para luchar contra una mascota salvaje)" },
           "slot": { "description": "Cuál de tus mascotas combate (por defecto, la primera)" },
-          "bet": { "description": "Monedas a apostar (requiere un oponente)" }
+          "bet": { "description": "Monedas a apostar (requiere un oponente)" },
+          "rated": { "description": "Combate clasificatorio en la escalera (requiere oponente; niveles igualados)" }
         }
       }
     }

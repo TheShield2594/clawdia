@@ -36,6 +36,7 @@ function interaction({
     sub,
     strings = {},
     integers = {},
+    booleans = {},
     channelOption = undefined,
     manageGuild = true,
 } = {}) {
@@ -53,6 +54,7 @@ function interaction({
             getSubcommand: () => sub,
             getString: name => strings[name] ?? null,
             getInteger: name => integers[name] ?? null,
+            getBoolean: name => booleans[name] ?? null,
             getChannel: () => (channelOption === undefined ? null : channelOption),
         },
         reply: async payload => { replies.push(payload); return payload; },
@@ -145,6 +147,70 @@ describe('/ai schedule add', () => {
         expect(createTask).not.toHaveBeenCalled();
     });
 
+    it('takes a cron schedule with no first-run time, leaving the first run to it', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000),
+            repeat: null, cron: '0 9 * * 1-5', timezone: 'Etc/UTC'
+        } });
+        const i = interaction({ sub: 'add', strings: { instruction: 'morning brief', cron: '0 9 * * 1-5' }, integers: {} });
+
+        await command.execute(i);
+
+        const call = createTask.mock.calls[0][0];
+        expect(call).toMatchObject({ cron: '0 9 * * 1-5', repeat: null });
+        expect(call.fireAt).toBeNull();
+        expect(said(i)).toMatch(/weekdays at 09:00/);
+    });
+
+    it('sends a DM task to the person who set it up', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000), repeat: 'daily', deliverTo: 'dm'
+        } });
+        const i = add({ strings: { instruction: 'recap', every: 'daily', deliver: 'dm' } });
+
+        await command.execute(i);
+
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'dm', createdBy: 'u1' }));
+        expect(said(i)).toMatch(/to your DMs/);
+        expect(said(i)).toMatch(/Keep your DMs open/);
+    });
+
+    it('passes deep through as the task\'s mode', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000), repeat: 'daily', mode: 'deep'
+        } });
+        const i = add({ booleans: { deep: true } });
+
+        await command.execute(i);
+
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: 'deep' }));
+        expect(said(i)).toMatch(/as a \*\*deep\*\* task/);
+    });
+
+    it('leaves a task standard when deep is not asked for', async () => {
+        await command.execute(add());
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: 'standard' }));
+    });
+
+    it('refuses a DM task pointed at a channel', async () => {
+        const i = add({
+            strings: { instruction: 'recap', every: 'daily', deliver: 'dm' },
+            channelOption: { id: 'c2', isTextBased: () => true },
+        });
+        await command.execute(i);
+
+        expect(said(i)).toMatch(/leave `channel` out/);
+        expect(createTask).not.toHaveBeenCalled();
+    });
+
+    it('refuses a named cadence and a cron schedule together', async () => {
+        const i = add({ strings: { instruction: 'recap', every: 'daily', cron: '0 9 * * *' } });
+        await command.execute(i);
+
+        expect(said(i)).toMatch(/`every` or `cron`/);
+        expect(createTask).not.toHaveBeenCalled();
+    });
+
     it('passes the service\'s refusal straight through', async () => {
         // The caps live in one place, so the command shows what they said
         // rather than re-deriving them.
@@ -181,6 +247,17 @@ describe('/ai schedule list and remove', () => {
         const description = i.replies[0].embeds[0].data.description;
         expect(description).toMatch(/\*\*off\*\*/);
         expect(description).toMatch(/channel is gone/);
+    });
+
+    // One-shots are switched off when they run and never pruned; sorted by
+    // fireAt alone they would push a live task out of the listing's window.
+    it('lists active tasks ahead of switched-off ones', async () => {
+        const sort = jest.fn(() => ({ limit: async () => [task()] }));
+        ScheduledTask.find.mockReturnValue({ sort });
+
+        await command.execute(interaction({ sub: 'list' }));
+
+        expect(sort).toHaveBeenCalledWith({ enabled: -1, fireAt: 1 });
     });
 
     it('removes the task the short id names', async () => {

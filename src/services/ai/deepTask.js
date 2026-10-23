@@ -3,13 +3,16 @@
 const { resolveProviderConfig, getCompletion } = require('./index');
 const { providers } = require('./providers');
 const { buildBotTools, BOT_SERVER } = require('./botTools');
+const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildToolActionsAddendum } = require('./actions');
 const { buildMcpAddendum } = require('./mcp/prompt');
+const { forMember } = require('../../config/mcpServers');
 const { createToolActivity } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
 const { recordToolCalls } = require('./mcp/usage');
 const { TASK_MAX_TOOL_ROUNDS, TASK_TURN_BUDGET_MS } = require('./mcp/toolkit');
 const { checkDeepTaskLimit } = require('./rateLimit');
+const { delegateTool, buildDelegateAddendum } = require('./delegate');
 
 /**
  * Deep task mode: one turn with room to actually do something (#835).
@@ -90,7 +93,7 @@ function chunk(text, size = DISCORD_MAX_LEN, limit = MAX_RESULT_MESSAGES) {
 function refuseTask({ ai, guildId, userId }) {
     if (!ai?.enabled) return 'The AI is switched off on this server.';
     if (!ai.taskModeEnabled) {
-        return 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Chat** in the dashboard.';
+        return 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Abilities** in the dashboard.';
     }
 
     const config = resolveProviderConfig(ai, { guildId });
@@ -111,7 +114,7 @@ function refuseTask({ ai, guildId, userId }) {
  * reply. Without that a model given twelve rounds still answers in one, because
  * everything else about the prompt says it is in a chat.
  */
-function taskSystemPrompt(ai, { actionsEnabled, hasServers }) {
+function taskSystemPrompt(ai, { actionsEnabled, hasServers, agentTools = [], delegation = false }) {
     let systemPrompt = ai.systemPrompt || 'You are a helpful Discord bot assistant.';
 
     systemPrompt += '\n\nYou are running a **task**, not answering a chat message. Nobody is watching this arrive, '
@@ -123,7 +126,9 @@ function taskSystemPrompt(ai, { actionsEnabled, hasServers }) {
         + 'impossible with the tools you have, say so plainly and say what you would need.';
 
     if (hasServers) systemPrompt += buildMcpAddendum({ actionsEnabled: false });
-    if (actionsEnabled) systemPrompt += buildToolActionsAddendum(null);
+    if (actionsEnabled) systemPrompt += buildToolActionsAddendum(null, { autoMemory: ai.memory?.autoSave === true });
+    systemPrompt += buildAgentToolsAddendum(agentTools);
+    if (delegation) systemPrompt += buildDelegateAddendum();
 
     return systemPrompt;
 }
@@ -195,6 +200,20 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
         }
     }
 
+    const canManage = Boolean(member?.permissions?.has?.('ManageGuild'));
+    // The connections this person may use; their sub-agents inherit the list.
+    config.mcpServers = forMember(config.mcpServers, canManage);
+    const agentTools = buildAgentTools(ai, {
+        guildId: guild.id,
+        userId: user.id,
+        canManage,
+        rateLimit: config.rateLimit
+    });
+    // Sub-agents for the parts of the task that split cleanly (#1232). Their
+    // tool calls come out of this person's allowance and show on this task's
+    // progress line.
+    const delegate = delegateTool({ ai, config, guildId: guild.id, userId: user.id, onToolEvent: activity.onEvent });
+
     let answer = '';
     let failure = null;
     try {
@@ -202,7 +221,9 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             ...config,
             systemPrompt: taskSystemPrompt(ai, {
                 actionsEnabled: Boolean(ai.actionsEnabled),
-                hasServers: (config.mcpServers || []).length > 0
+                hasServers: (config.mcpServers || []).length > 0,
+                agentTools,
+                delegation: true
             }),
             history: [],
             prompt,
@@ -214,7 +235,7 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             onToolEvent: activity.onEvent,
             mcpConfirm: config.mcpConfirm,
             confirmTool: createToolConfirmer(shim, { approver: config.mcpApprover }),
-            botTools: ai.actionsEnabled ? buildBotTools(shim) : [],
+            botTools: [...(ai.actionsEnabled ? buildBotTools(shim, { ai }) : []), ...agentTools, delegate],
             // Attributed, so the guild's ordinary windows bound this turn as
             // well as the deep-task allowance already spent above.
             userId: user.id,
@@ -236,11 +257,9 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
 
     // The guild's activity ledger counts what its own connections did. The
     // bot's tools are not one of them, the same split the chat transport makes.
-    if (activity.used) {
-        const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
-        if (serverCalls.length || activity.unreachableServers.length) {
-            await recordToolCalls(guild.id, serverCalls, activity.unreachableServers).catch(() => {});
-        }
+    const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
+    if (serverCalls.length || activity.unreachableServers.length) {
+        await recordToolCalls(guild.id, serverCalls, activity.unreachableServers).catch(() => {});
     }
 
     const footer = activity.footer();
@@ -263,6 +282,21 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
     for (const rest of pieces.slice(1)) {
         await channel.send({ content: rest, allowedMentions: { parse: [] } }).catch(() => {});
     }
+
+    // Anything a tool made for the channel — a generated image, a chart — in a
+    // message of its own after the report, the way the chat reply posts them.
+    if (activity.attachments.length) {
+        await channel.send({ files: activity.attachments, allowedMentions: { parse: [] } }).catch(err =>
+            console.error('[Deep task] tool attachments send failed:', err?.message || err));
+    }
 }
 
-module.exports = { runDeepTask, refuseTask, __test__: { chunk, taskSystemPrompt, messageShim } };
+// `taskSystemPrompt` and `chunk` are public because a scheduled deep task
+// (scheduledTaskService) frames and splits its runs the same way.
+module.exports = {
+    runDeepTask,
+    refuseTask,
+    taskSystemPrompt,
+    chunk,
+    __test__: { chunk, taskSystemPrompt, messageShim }
+};

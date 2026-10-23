@@ -16,6 +16,18 @@ const {
 } = require('../../../services/exploreService');
 const { REGION_LIST, RELIC_LIST } = require('../../../data/exploreData');
 
+// /explore's own palette. These are the feature's identity rather than an
+// outcome role, so they live here rather than in utils/embedColors (see the
+// rule written up there) — but in one place, not retyped at every call site.
+const EXPLORE_COLORS = Object.freeze({
+    TRAIL:    '#2e7d32',   // the forest green every non-region /explore embed wears
+    TRAP:     '#b5651d',
+    LOSS:     '#CC4400',
+    JOURNAL:  '#8d6e63',
+    RELIC:    '#c9a227',
+    PRESTIGE: '#6a1b9a',
+});
+
 const EVENT_TYPE_EMOJI = {
     discovery: '🗿', lore: '📜', secret: '✨', treasure: '🪙',
     trap: '🪤', encounter: '👁️', quiet: '🌫️',
@@ -74,11 +86,10 @@ function regionGateError(user, region, guildSettings) {
     if (region.seasonalEventId && !isRegionInSeason(region, guildSettings)) {
         return `**${region.emoji} ${region.name}** is out of season. It will be back — that kind of place always comes back. Keep an eye on \`/event status\`.`;
     }
+    // The level requirement gates opening the route, not walking it: a route
+    // once opened stays open, prestige included (see getAvailableRegions).
     if (!region.seasonalEventId && !e.unlockedRegions.includes(region.id)) {
         return `You haven't opened the way to **${region.emoji} ${region.name}** yet. Use \`/explore travel\` — it costs **${region.unlockCost.toLocaleString()}** coins and Explorer Level **${region.unlockLevel}**.`;
-    }
-    if (!region.seasonalEventId && e.level < region.unlockLevel) {
-        return `**${region.emoji} ${region.name}** requires Explorer Level **${region.unlockLevel}**. The place isn't going anywhere. You should be, though — go level up.`;
     }
     return null;
 }
@@ -110,6 +121,7 @@ function prestigeBonusLines(bonus, previous = null) {
 }
 
 module.exports = {
+    EXPLORE_COLORS,
     EVENT_TYPE_EMOJI,
     loadGuildOrReply,
     loadContext,

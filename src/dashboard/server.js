@@ -3,6 +3,7 @@ const express = require('express');
 const compression = require('compression');
 const session = require('express-session');
 const { createSessionStore } = require('./lib/sessionStore');
+const { resolveTrustProxy } = require('./lib/trustProxy');
 const passport = require('passport');
 const { Strategy: DiscordStrategy, DiscordScope } = require('./lib/discordStrategy');
 const path = require('path');
@@ -243,11 +244,17 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     const [secretProblem] = checkSessionSecret(process.env);
     if (secretProblem) throw new Error(`[DASHBOARD] ${secretProblem}`);
 
-    // Trust the first hop from a reverse proxy (nginx, Caddy, etc.) so that
-    // req.protocol reflects the original HTTPS scheme and the secure: true
-    // cookie flag works correctly when deployed behind a proxy.
+    // Which reverse proxy (nginx, Caddy, etc.) to believe about the client's
+    // address and scheme, so req.protocol reflects the original HTTPS and the
+    // secure cookie works — without believing a client that sends its own
+    // X-Forwarded-For to a deploy with no proxy at all (#1161). See
+    // lib/trustProxy.js for the TRUST_PROXY values.
     const isProduction = process.env.NODE_ENV === 'production';
-    if (isProduction) app.set('trust proxy', 1);
+    const trustProxy = resolveTrustProxy({
+        NODE_ENV: process.env.NODE_ENV,
+        TRUST_PROXY: process.env.TRUST_PROXY,
+    });
+    if (trustProxy.value !== false) app.set('trust proxy', trustProxy.value);
 
     // L3: Baseline security response headers for all routes.
     // A fresh nonce is generated per request and made available to EJS templates

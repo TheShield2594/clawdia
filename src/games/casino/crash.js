@@ -10,7 +10,6 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal } = require('./betGuard');
-const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedByMembers } = require('../../utils/collectorOwner');
 const {
@@ -340,13 +339,10 @@ async function startCrashGame(interaction, lobby, lobbyId) {
     const bet       = lobby.bet;
     const guildId   = interaction.guild.id;
 
-    const hostDoc     = await User.findOne({ userId: lobby.hostId, guildId });
-    // Charm boost only applies to low-stakes lobbies — a +20% crash-point shift on an
-    // unbounded bet would flip the game's expected value player-positive.
-    const luckyActive = hostDoc ? hasEffect(hostDoc, 'lucky_charm') && luckySaveEligible(lobby.bet) : false;
-    const crash       = luckyActive
-        ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
-        : generateCrashPoint();
+    // The curve and nothing else. A host's Lucky Charm used to scale the crash
+    // point by 1.2, which is a 1.2× return on every cash-out target: 119% of
+    // the stake for everyone in the lobby, on a game that keeps 1% (#873, pass 26).
+    const crash = generateCrashPoint();
 
     // Instant crash
     if (crash <= 1.00) {

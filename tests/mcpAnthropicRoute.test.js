@@ -120,11 +120,17 @@ describe('which route a request takes', () => {
         expect(tookClientRoute()).toBe(false);
     });
 
-    test('the connector when the guild insisted, approvals or not', async () => {
-        // Their instance, their call — but it is a choice they made rather than
-        // one a provider dropdown made for them.
-        await collect(anthropic.stream({ ...REQ, mcpRoute: 'connector', mcpConfirm: 'always' }));
+    test('the connector when the guild insisted and nothing needs approval', async () => {
+        await collect(anthropic.stream({ ...REQ, mcpRoute: 'connector', mcpConfirm: 'off' }));
         expect(tookClientRoute()).toBe(false);
+    });
+
+    // #1149. The connector runs calls on Anthropic's side, where no approval
+    // prompt can exist — honouring `connector` here would switch the guild's
+    // approvals off without telling anyone.
+    test('the client when the guild insisted on the connector but approvals are on', async () => {
+        await collect(anthropic.stream({ ...REQ, mcpRoute: 'connector', mcpConfirm: 'always' }));
+        expect(tookClientRoute()).toBe(true);
     });
 
     // #796. Unlike the approval policy, this is not a preference being honoured

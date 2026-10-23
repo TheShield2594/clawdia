@@ -71,7 +71,14 @@ function semanticConfig(aiSettings) {
     if (!settings || !settings.enabled) return null;
     return {
         provider: settings.provider || 'local',
-        localModel: settings.localModel || DEFAULT_LOCAL_MODEL
+        // Always the default, whatever the guild's record says. The field is
+        // writable through the generic `ai.*` settings route though no panel
+        // shows it, and whatever it names is downloaded from Hugging Face and
+        // held in memory for the life of the process — so a guild admin
+        // cycling through repository names could fill the host's disk and
+        // memory with models. Which model to run on the host is the operator's
+        // call, not a guild's.
+        localModel: DEFAULT_LOCAL_MODEL
     };
 }
 
@@ -152,32 +159,69 @@ async function localEmbedder(model) {
     };
 }
 
+/**
+ * Held to the guild's monthly ceiling (and the operator's, on the operator's
+ * key) before each paid call, and recorded in the ledger after it.
+ *
+ * Embeddings run on every message once semantic retrieval is on, and on every
+ * note written, so they are a steady spend of their own: unchecked, a guild out
+ * of budget went on paying for one per message, and none of it was on the
+ * ledger the ceiling reads. A refusal throws, which every caller already reads
+ * as "no vector" and falls back to keyword matching.
+ */
+function metered(guildId, aiSettings, keySource, provider, model, call) {
+    const { budgetRefusal, guildLimitsOf } = require('./rateLimit');
+    const { recordUsage } = require('./usage');
+    const limits = guildLimitsOf(aiSettings);
+    return async texts => {
+        const refusal = budgetRefusal(guildId, limits, keySource);
+        if (refusal) throw new Error(refusal);
+        const { vectors, inputTokens } = await call(texts);
+        if (inputTokens > 0) {
+            Promise.resolve()
+                .then(() => recordUsage(guildId, provider, model, { inputTokens, outputTokens: 0 }))
+                .catch(err => console.warn(`[AI:embeddings] could not record usage: ${err.message}`));
+        }
+        return vectors;
+    };
+}
+
 /** The OpenAI embedder for this guild, or null when no key resolves. */
-async function openaiEmbedder(aiSettings) {
-    const { decryptSecret } = require('../../config/secretBox');
-    const apiKey = decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY;
+async function openaiEmbedder(aiSettings, guildId) {
+    const { resolveApiKey } = require('./apiKeys');
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
 
     const OpenAI = require('openai');
     const client = new OpenAI({ apiKey });
-    return async texts => {
+    return metered(guildId, aiSettings, keySource, 'openai', OPENAI_EMBED_MODEL, async texts => {
         const response = await client.embeddings.create({ model: OPENAI_EMBED_MODEL, input: texts });
-        return response.data.map(item => item.embedding);
-    };
+        return {
+            vectors: response.data.map(item => item.embedding),
+            inputTokens: response.usage?.prompt_tokens || 0
+        };
+    });
 }
 
 /** The Gemini embedder for this guild, or null when no key resolves. */
-async function geminiEmbedder(aiSettings) {
-    const { decryptSecret } = require('../../config/secretBox');
-    const apiKey = decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY;
+async function geminiEmbedder(aiSettings, guildId) {
+    const { resolveApiKey } = require('./apiKeys');
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
 
     const { GoogleGenAI } = require('@google/genai');
     const client = new GoogleGenAI({ apiKey });
-    return async texts => {
+    return metered(guildId, aiSettings, keySource, 'gemini', GEMINI_EMBED_MODEL, async texts => {
         const response = await client.models.embedContent({ model: GEMINI_EMBED_MODEL, contents: texts });
-        return (response.embeddings || []).map(item => item.values);
-    };
+        return {
+            vectors: (response.embeddings || []).map(item => item.values),
+            // The reported count when the response carries one; otherwise an
+            // estimate at the usual four characters a token, since the SDK's
+            // embedding response has no token count of its own.
+            inputTokens: response.usageMetadata?.promptTokenCount
+                || Math.ceil(texts.reduce((sum, text) => sum + String(text || '').length, 0) / 4)
+        };
+    });
 }
 
 /**
@@ -185,20 +229,22 @@ async function geminiEmbedder(aiSettings) {
  * cannot be stood up.
  *
  * @param {object} aiSettings a guild's `ai` settings subdocument
+ * @param {string} [guildId] whose settings they are — a guild's provider key is
+ *   sealed to it and will not open without it
  * @returns {Promise<null|{id: string, embed: (texts: string[]) => Promise<number[][]>}>}
  *   `id` is the embedder's identity, stored beside each vector; `embed` turns a
  *   batch of strings into their vectors. Null on every failure — no key, package
  *   missing, model unavailable — so callers treat "no embedder" and "tier off"
  *   the same way and fall back to keyword scoring.
  */
-async function getEmbedder(aiSettings) {
+async function getEmbedder(aiSettings, guildId) {
     const config = semanticConfig(aiSettings);
     if (!config) return null;
 
     let embed;
     try {
-        if (config.provider === 'openai') embed = await openaiEmbedder(aiSettings);
-        else if (config.provider === 'gemini') embed = await geminiEmbedder(aiSettings);
+        if (config.provider === 'openai') embed = await openaiEmbedder(aiSettings, guildId);
+        else if (config.provider === 'gemini') embed = await geminiEmbedder(aiSettings, guildId);
         else embed = await localEmbedder(config.localModel);
     } catch (err) {
         console.warn(`[AI:embeddings] could not initialise the ${config.provider} embedder: ${err.message}`);
@@ -219,8 +265,8 @@ async function getEmbedder(aiSettings) {
  *
  * @returns {Promise<null|{embedding: number[], embeddingModel: string}>}
  */
-async function embedForStorage(aiSettings, text) {
-    const embedder = await getEmbedder(aiSettings);
+async function embedForStorage(aiSettings, text, guildId) {
+    const embedder = await getEmbedder(aiSettings, guildId);
     if (!embedder) return null;
 
     try {

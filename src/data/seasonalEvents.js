@@ -35,7 +35,7 @@ const SEASONAL_EVENTS = {
         shop: [
             { itemId: 'winter_loot_box',  name: 'Winter Loot Box',  emoji: '🎁',  cost: 50,  description: 'Contains exclusive winter items' },
             { itemId: 'snowflake_crown',  name: 'Snowflake Crown',  emoji: '👑',  cost: 300, description: 'Legendary collectible crown' },
-            { itemId: 'coin_booster_2x',  name: '2x Coin Booster',  emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
+            { itemId: 'coin_booster_2x',  name: '2x Coin Booster',  emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour (not the casino)' },
             { itemId: 'xp_booster_2x',    name: '2x XP Booster',    emoji: '⭐🚀', cost: 80,  description: '2x XP for 1 hour' },
         ],
     },
@@ -74,8 +74,8 @@ const SEASONAL_EVENTS = {
         shop: [
             { itemId: 'halloween_loot_box', name: 'Halloween Loot Box', emoji: '🎃',  cost: 50,  description: 'Contains spooky exclusive items' },
             { itemId: 'witchs_hat',         name: "Witch's Hat",        emoji: '🧙',  cost: 300, description: 'Legendary Halloween collectible' },
-            { itemId: 'lucky_charm',        name: 'Lucky Charm',        emoji: '🍀',  cost: 60,  description: '2h luck boost for games' },
-            { itemId: 'coin_booster_2x',    name: '2x Coin Booster',    emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
+            { itemId: 'lucky_charm',        name: 'Lucky Charm',        emoji: '🍀',  cost: 60,  description: '2h luck boost for /crime and the casino' },
+            { itemId: 'coin_booster_2x',    name: '2x Coin Booster',    emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour (not the casino)' },
         ],
     },
 
@@ -152,8 +152,8 @@ const SEASONAL_EVENTS = {
         shop: [
             { itemId: 'valentines_loot_box', name: "Valentine's Loot Box", emoji: '💝',  cost: 50,  description: 'Contains romantic exclusive items' },
             { itemId: 'golden_rose',         name: 'Golden Rose',         emoji: '🌹',  cost: 300, description: 'Legendary Valentine collectible' },
-            { itemId: 'lucky_streak',        name: 'Lucky Streak',        emoji: '🎯',  cost: 70,  description: '+25% win rate for 30 min' },
-            { itemId: 'coin_booster_2x',     name: '2x Coin Booster',     emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
+            { itemId: 'lucky_streak',        name: 'Lucky Streak',        emoji: '🎯',  cost: 70,  description: '30 min of casino loss saves' },
+            { itemId: 'coin_booster_2x',     name: '2x Coin Booster',     emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour (not the casino)' },
         ],
     },
 
@@ -192,7 +192,7 @@ const SEASONAL_EVENTS = {
         shop: [
             { itemId: 'winter_hunt_loot_box', name: 'Winter Hunt Loot Box', emoji: '🎁',  cost: 60,  description: 'Contains exclusive Winter Hunt items' },
             { itemId: 'frost_crown',          name: 'Frost Crown',          emoji: '👑',  cost: 400, description: 'Legendary cross-system collectible' },
-            { itemId: 'coin_booster_2x',      name: '2x Coin Booster',      emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
+            { itemId: 'coin_booster_2x',      name: '2x Coin Booster',      emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour (not the casino)' },
             { itemId: 'xp_booster_2x',        name: '2x XP Booster',        emoji: '⭐🚀', cost: 80,  description: '2x XP for 1 hour' },
         ],
     },

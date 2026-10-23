@@ -14,6 +14,98 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [5.0.0] - 2026-09-25
+
+Migrations through `029_bind_guild_ai_keys`.
+
+Security fixes from the whole-repo review. **Major**: migration 029 writes guild
+AI keys in a format the 4.x images cannot read (roll back with
+`npm run migrate:rollback` before deploying an older image), and two changes
+below need an operator to act on upgrade.
+
+- **Stored guild AI keys are bound to their guild and field (#1152).** Keys are
+  now sealed with the guild ID and field name as GCM additional authenticated
+  data (`enc.v2.`), so a sealed key copied into another guild's document, or
+  into another field, no longer opens. Migration 029 rewrites the existing
+  `enc.v1.` keys (reversible: `down` unbinds them). Decryption also pins the
+  GCM tag to 16 bytes and rejects shorter ones, which Node would otherwise
+  accept.
+- **Production refuses to run MongoDB without authentication (#1151).** A
+  `NODE_ENV=production` boot now fails when `MONGODB_URI` carries no
+  credentials, where it used to warn. **Action needed** on a deployment still
+  running without auth: follow "Enabling MongoDB authentication" in
+  docs/SETUP_GUIDE.md, or set `MONGODB_ALLOW_NO_AUTH=true` to keep running
+  without it (the old warning is kept).
+- **Guilds need the operator's say-so to spend the bot-wide AI keys (#1147).**
+  A guild with no key of its own used to fall back to `OPENAI_API_KEY` and the
+  other environment keys, limited only by its own settings, where 0 means
+  unlimited. Now only the guilds listed in `AI_ENV_KEY_GUILDS` (or `*` for
+  all) may use them, and that spend is held to operator ceilings a guild can
+  tighten but not lift: `AI_ENV_KEY_USER_LIMIT` (20 messages per user per 10
+  minutes), `AI_ENV_KEY_MONTHLY_COST` ($10) and `AI_ENV_KEY_MONTHLY_TOKENS`
+  (5,000,000) per guild per month. A saved guild key that will not decrypt is
+  now reported to the guild instead of silently replaced by the operator's.
+  **Action needed** if your servers rely on a bot-wide key: set
+  `AI_ENV_KEY_GUILDS`. The boot log warns when it is missing.
+
+## [4.15.0] - 2026-09-25
+
+Migrations through `028_seed_pet_bond`.
+
+Pet follow-ups from the design review (#1180), and slots drawn as a table image (#1199).
+
+- **Pet bond is earned by care, not by age (#1186).** Bond was the number of
+  days since adoption, so the Most Loyal board ranked pets by age and a revived
+  pet kept counting the days it was gone. It is now a stored 0–100 value:
+  feeding and playing add 2 and battling adds 1, at most 4 a pet a day. It
+  drains 2 a day while the pet is below 30% hunger, and running away costs 25.
+  Five tiers (Wary, Friendly, Trusted, Devoted, Soulbound) add 1–6% to the
+  passive, show as a title, and from Trusted up frame the companion card. The
+  leaderboard ranks by bond. Migration 028 seeds existing pets from their age,
+  one point per two days capped at 50; it is reversible, and the previous image
+  ignores the new fields.
+- **Rob and crime passives are labelled in points (#1190).** They add
+  percentage points to a success chance, while every other passive multiplies a
+  payout, and both were printed as "+X%". A maxed Fox now reads "+20 pts rob
+  success chance" (40% → 60%). The balance is unchanged.
+- **`/pet feed` takes a `quantity` (#1188),** 1–10. It feeds one item at a time
+  and stops once the pet is full, so no item is spent past that point, and the
+  reply says how many were used and how many are left.
+- **Train replaces Rest (#1182).** Rest halved hunger decay for two hours,
+  about 0.4 hunger a press, and was only pressed for care credit. The status
+  card now has three Train buttons: Power (+0.4% ATK a session), Guard (+1%
+  DEF) and Agility (+3% SPD and +0.5 pts crit), up to 10 sessions each. A
+  session costs 8 hunger, needs a fed pet, has an 8-hour cooldown per pet, and
+  counts as care (+1 bond). The steps differ because the stats do not weigh
+  the same, and were tuned so that each maxed focus is worth about the same.
+  A fully trained pet beats its untrained twin about as often as a pet one
+  level up would (~75%). The companion card shows training under the battle
+  stats. The tests keep fully trained personality pairings within 42–58%.
+  Hunger decays at one speed now, and a stored `restUntil` is ignored.
+- **Each species has a signature move (#1183),** named in the battle log and
+  on the companion card: Stand Firm, Nine Lives, Flurry, Slippery Scales,
+  Feint, Pack Howl, Talon Dive, Frenzy, Crystal Ward and Lantern Flare. The
+  wild opponents have Gore Charge, Hiss, Scavenge and Echolocation. Every
+  species pairing at equal level stays within 42–58%. The four rare pets get
+  1% on HP, attack and defence, which wins them at most about 62% of fights
+  against a shop or wild pet (55% on average). The battle log shows up to
+  eight lines: the last four rounds, plus earlier rounds where a move fired.
+- **Pet of the Week is announced with the companion card (#1189),** with the
+  ribbon on, the owner in the kicker, the week's care count in the footer,
+  and alt text. The emoji sprite is only the fallback for when the card
+  cannot be drawn.
+- **`/casino slots` is drawn as a table image (#1199),** in blackjack's style.
+  It uses the purple felt, three reel faces with the payline, the chip and
+  the result banner, and Heat, bet and pot along the top. Reels stop one at a
+  time, a tease holds the last reel with a gold glow, and a Hot Spin starts
+  with reel 1 locked and glowing orange. Free spins fill a strip of result
+  tiles on one image in three edits, rather than one edit per spin. Frames
+  are JPEG, the spinning frame is cached, and each image has alt text naming
+  the line and the result. The embed keeps the line, payout, balance and
+  session, and falls back to the text grid if drawing fails. The felt, rail
+  and banner moved into `tableArt.js`, where blackjack and roulette share
+  them.
+
 ## [4.14.0] - 2026-09-24
 
 Migrations through `027_encrypt_mcp_tokens`.

@@ -1,6 +1,8 @@
 // Shared Express middleware for the dashboard API routes.
 
-const { hasManagePermission, verifyLiveGuildAccess } = require('./permissions');
+const {
+    hasManagePermission, snapshotHasPermissions, verifyLiveGuildAccess, verifyLivePermissions,
+} = require('./permissions');
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
 
 const WRITE_RL_WINDOW_MS = 60 * 1000;
@@ -56,6 +58,41 @@ async function checkGuildAccess(req, res, next) {
     }
 
     next();
+}
+
+/**
+ * The Discord permission an action needs, beyond dashboard access (#1154).
+ *
+ * checkGuildAccess admits anyone with Manage Server. That is the right gate for
+ * settings, and the wrong one for an action Discord guards with a narrower
+ * permission: a Manage Server user without Ban Members could unban through the
+ * bot, which Discord itself would refuse them. Mount this after
+ * checkGuildAccess, naming PermissionFlagsBits keys:
+ *
+ *     router.post(path, checkAuth, checkGuildAccess, requireGuildPermission('BanMembers'), …)
+ *
+ * Live answer first. A null live answer falls back to the session snapshot,
+ * the same soft edge checkGuildAccess has and for the same reason; a definite
+ * false denies.
+ */
+function requireGuildPermission(...names) {
+    if (names.length === 0) throw new Error('requireGuildPermission needs at least one permission name.');
+    return async function checkGuildPermission(req, res, next) {
+        const { guildId } = req.params;
+        const deny = () => res.status(403).json({ error: 'You do not have the Discord permission this action needs.' });
+        try {
+            const live = await verifyLivePermissions(req.bot, guildId, req.user?.id, names);
+            if (live === false) return deny();
+            if (live === null) {
+                const snapshot = (req.user?.guilds ?? []).find(g => g.id === guildId);
+                if (!snapshotHasPermissions(snapshot, names)) return deny();
+            }
+        } catch (error) {
+            console.error('Guild permission check error:', error);
+            return deny();
+        }
+        next();
+    };
 }
 
 function checkWriteRateLimit(req, res, next) {
@@ -118,4 +155,6 @@ function checkCsrfOrigin(req, res, next) {
 // correct authorization is "administers something, somewhere", and leaving the
 // helper in place is an invitation for the next route to reach for it.
 
-module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin };
+module.exports = {
+    checkAuth, checkGuildAccess, requireGuildPermission, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin,
+};

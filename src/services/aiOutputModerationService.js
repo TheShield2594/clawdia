@@ -3,7 +3,7 @@
 const OpenAI = require('openai');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const { requestModelJson } = require('../utils/modelJson');
-const { decryptSecret } = require('../config/secretBox');
+const { resolveApiKey } = require('./ai/apiKeys');
 
 /**
  * An optional moderation pass over the model's own outbound text, run before the
@@ -101,8 +101,8 @@ const SYSTEM_PROMPT =
  * bot-wide environment key, or null when neither is set. Mirrors the openai
  * provider's own `resolveAuth`.
  */
-function openaiKeyFor(ai) {
-    return decryptSecret(ai?.openaiKey) || process.env.OPENAI_API_KEY || null;
+function openaiKeyFor(ai, guildId) {
+    return resolveApiKey(ai, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId }).apiKey;
 }
 
 /**
@@ -113,8 +113,8 @@ function openaiKeyFor(ai) {
 function outputModerationEnabled(guildDoc) {
     const ai = guildDoc?.ai;
     if (!ai?.enabled || !guildDoc?.moderation?.aiOutputModeration) return false;
-    if (openaiKeyFor(ai)) return true;
-    const { provider, apiKey } = resolveProviderConfig(ai);
+    if (openaiKeyFor(ai, guildDoc.guildId)) return true;
+    const { provider, apiKey } = resolveProviderConfig(ai, { guildId: guildDoc.guildId });
     return provider === 'ollama' || Boolean(apiKey);
 }
 
@@ -156,7 +156,7 @@ async function moderateWithOpenAI(apiKey, content) {
  * other failure.
  */
 async function moderateWithProvider(guildDoc, content) {
-    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai);
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai, { guildId: guildDoc.guildId });
 
     const prompt =
         '--- Text under review ---\n'
@@ -204,7 +204,7 @@ async function moderateOutput(guildDoc, text) {
     const content = String(text ?? '').trim();
     if (!content) return null;
 
-    const openaiKey = openaiKeyFor(guildDoc.ai);
+    const openaiKey = openaiKeyFor(guildDoc.ai, guildDoc.guildId);
     try {
         return openaiKey
             ? await moderateWithOpenAI(openaiKey, content)

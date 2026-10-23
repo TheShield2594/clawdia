@@ -5,9 +5,10 @@ const { MAX_REMINDER_MINUTES, MAX_REMINDER_MESSAGE_LENGTH } = require('../../uti
 const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
-    MIN_TASK_DELAY_MINUTES
+    MIN_TASK_DELAY_MINUTES,
+    MIN_CRON_INTERVAL_MINUTES
 } = require('../../utils/scheduledTaskLimits');
-const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../../utils/memoryLimits');
+const { MAX_MEMORY_LENGTH, memoryCapFor } = require('../../utils/memoryLimits');
 const { runAction } = require('./actions');
 
 /**
@@ -118,7 +119,7 @@ function scheduleTaskTool(message) {
         name: 'schedule_task',
         description:
             'Schedule an instruction for you to carry out later, once or on a repeating cadence — '
-            + 'posting the result in this channel. Use it only when the answer has to be worked out at '
+            + 'posting the result in this channel, or sending it to the person by DM. Use it only when the answer has to be worked out at '
             + 'the time (checking feeds, recapping a channel, comparing something against last week). '
             + 'For "remind me to…", use create_reminder instead: each run of a scheduled task costs the '
             + 'server a full AI request. The user is asked to approve it before it is set.',
@@ -133,15 +134,37 @@ function scheduleTaskTool(message) {
                 type: 'integer',
                 minimum: MIN_TASK_DELAY_MINUTES,
                 maximum: MAX_TASK_DELAY_MINUTES,
-                description: 'How many minutes from now the first run should be.'
+                description: 'How many minutes from now the first run should be. Required unless repeat is "cron", '
+                    + 'where the schedule decides the first run and this is left out.'
             },
             repeat: {
                 type: 'string',
-                enum: ['none', 'daily', 'weekly', 'monthly'],
-                description: 'How often it repeats after the first run. "none" runs it once.'
+                enum: ['none', 'daily', 'weekly', 'monthly', 'cron'],
+                description: 'How often it repeats after the first run. "none" runs it once; "cron" follows the cron '
+                    + 'field, for cadences the others cannot say, like weekdays only or every few hours.'
+            },
+            cron: {
+                type: 'string',
+                maxLength: 100,
+                description: 'Only with repeat "cron": a five-field cron expression (minute hour day-of-month month '
+                    + `day-of-week), e.g. "0 9 * * 1-5" for weekdays at 09:00. Runs at least ${MIN_CRON_INTERVAL_MINUTES} `
+                    + 'minutes apart. Times are in the server\'s timezone, which the result tells you.'
+            },
+            deliverTo: {
+                type: 'string',
+                enum: ['channel', 'dm'],
+                description: 'Where each result goes: "channel" posts it in this channel (the default), "dm" sends '
+                    + 'it privately to the person you are replying to — only ever them. Use "dm" only when they ask '
+                    + 'for it privately or by DM.'
+            },
+            deep: {
+                type: 'boolean',
+                description: 'Give each run deep task mode\'s room — many more tool rounds and several minutes — for '
+                    + 'instructions that must look several things up before answering. Only works where the server has '
+                    + 'deep task mode on, and repeats at most hourly. Leave it out for anything one look can answer.'
             }
         },
-        required: ['instruction', 'delayMinutes', 'repeat'],
+        required: ['instruction', 'repeat'],
         confirm: true,
         run: args => runAction({ type: 'schedule_task', ...args }, message)
     });
@@ -163,18 +186,28 @@ function modSuggestionTool(message) {
  * Remember something about this user for future conversations (#833).
  *
  * Memories are read back into the system prompt of every later reply, which is
- * why this one asks first: it is the only tool here whose effect outlives the
- * conversation, and a model that can write to its own context unprompted is a
- * model that can talk itself into anything a day later. The approval buttons are
- * the toolkit's, the same ones a writing MCP tool goes through.
+ * why this one asks first by default: it is the only tool here whose effect
+ * outlives the conversation, and a model that can write to its own context
+ * unprompted is a model that can talk itself into anything a day later. The
+ * approval buttons are the toolkit's, the same ones a writing MCP tool goes
+ * through.
+ *
+ * A guild can switch that off (`ai.memory.autoSave`), and then the model saves
+ * what it learns as it goes — the posture of a personal assistant on a server
+ * run by one person. The description changes with it, because "the user is
+ * asked first" and "save things without being asked" are opposite instructions.
  */
-function memoryTool(message) {
+function memoryTool(message, { cap, autoSave }) {
     return tool({
         name: 'save_memory',
-        description:
-            'Remember one fact about this person for future conversations — a preference, a project they are working on, '
-            + 'how they like to be addressed. The user is asked to approve it before it is saved. '
-            + 'Only for things worth recalling days later, not for what was just said.',
+        description: autoSave
+            ? 'Remember one fact about this person for future conversations — a preference, a project they are working on, '
+                + 'a person or place in their life, how they like things done. Save it as soon as you learn it, without '
+                + 'asking: they have chosen to have you remember. Only for things worth recalling days later, not for '
+                + `what was just said. They can keep ${cap}; when full, forget_memory one that is stale first.`
+            : 'Remember one fact about this person for future conversations — a preference, a project they are working on, '
+                + 'how they like to be addressed. The user is asked to approve it before it is saved. '
+                + 'Only for things worth recalling days later, not for what was just said.',
         properties: {
             content: {
                 type: 'string',
@@ -183,12 +216,41 @@ function memoryTool(message) {
             }
         },
         required: ['content'],
-        confirm: true,
-        run: args => saveMemory(args, message)
+        confirm: !autoSave,
+        run: args => saveMemory(args, message, { cap })
     });
 }
 
-async function saveMemory(args, message) {
+/**
+ * Drop a memory that has gone stale or wrong.
+ *
+ * The counterpart that makes auto-save workable: a memory store the model can
+ * only append to fills up with the first ten things it heard and then stops
+ * learning. Matched by text rather than by number, because the model sees its
+ * memories as a list without numbers and should not have to count.
+ */
+function forgetMemoryTool(message, { autoSave }) {
+    return tool({
+        name: 'forget_memory',
+        description: 'Remove one of this person\'s saved memories that is out of date, wrong, or that they asked you to '
+            + 'forget. Quote it, or enough of it to pick out just that one. To correct a memory, forget the old one '
+            + 'and save the new one.'
+            + (autoSave ? '' : ' The user is asked to approve it first.'),
+        properties: {
+            content: {
+                type: 'string',
+                maxLength: MAX_MEMORY_LENGTH,
+                description: 'The memory to remove, as it appears in their saved context.'
+            }
+        },
+        required: ['content'],
+        confirm: !autoSave,
+        destructive: true,
+        run: args => forgetMemory(args, message)
+    });
+}
+
+async function saveMemory(args, message, { cap }) {
     const raw = typeof args?.content === 'string' ? args.content.trim() : '';
     if (!raw) return 'Nothing was saved: the memory was empty.';
 
@@ -201,7 +263,7 @@ async function saveMemory(args, message) {
         {
             userId: message.author.id,
             guildId: message.guild.id,
-            [`pinnedMemories.${MEMORY_CAP - 1}`]: { $exists: false },
+            [`pinnedMemories.${cap - 1}`]: { $exists: false },
             'pinnedMemories.content': { $ne: content }
         },
         {
@@ -228,7 +290,41 @@ async function saveMemory(args, message) {
     if ((existing.pinnedMemories || []).some(memory => memory.content === content)) {
         return 'Nothing was saved: that is already one of their saved memories.';
     }
-    return `Nothing was saved: they already have the maximum of ${MEMORY_CAP} saved memories. Tell them to remove one with \`/ai memories\` first.`;
+    return `Nothing was saved: they already have the maximum of ${cap} saved memories. Use forget_memory on one that `
+        + 'is stale, or tell them to remove one with `/ai memories`, then save again.';
+}
+
+/** Normalised for matching: case and runs of whitespace do not distinguish two memories. */
+function normalizeMemory(text) {
+    return String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+async function forgetMemory(args, message) {
+    const wanted = normalizeMemory(args?.content);
+    if (!wanted) return 'Nothing was removed: say which memory to forget.';
+
+    const existing = await User.findOne(
+        { userId: message.author.id, guildId: message.guild.id },
+        { pinnedMemories: 1 }
+    ).lean();
+    const memories = existing?.pinnedMemories || [];
+
+    // An exact match wins outright; otherwise the quote has to pick out exactly
+    // one memory, because removing the wrong one is worse than asking again.
+    let matches = memories.filter(memory => normalizeMemory(memory.content) === wanted);
+    if (!matches.length) matches = memories.filter(memory => normalizeMemory(memory.content).includes(wanted));
+    if (!matches.length) return 'Nothing was removed: none of their saved memories matches that.';
+    if (matches.length > 1) {
+        return `Nothing was removed: that matches ${matches.length} memories. Quote more of the one you mean.`;
+    }
+
+    const [target] = matches;
+    const result = await User.updateOne(
+        { userId: message.author.id, guildId: message.guild.id },
+        { $pull: { pinnedMemories: { _id: target._id } } }
+    );
+    if (!result?.modifiedCount) return 'Nothing was removed: that memory was already gone.';
+    return `Forgotten: "${target.content}"`;
 }
 
 /**
@@ -242,11 +338,19 @@ async function saveMemory(args, message) {
  * @param {object} message the message that started the turn
  * @param {object} [options]
  * @param {boolean} [options.enabled] the guild's `ai.actionsEnabled`
+ * @param {object} [options.ai] the guild's `ai` settings, for the memory cap
+ *        and whether memories are saved without asking
  */
-function buildBotTools(message, { enabled = true } = {}) {
+function buildBotTools(message, { enabled = true, ai = null } = {}) {
     if (!enabled) return [];
 
-    const tools = [pollTool(message), reminderTool(message), memoryTool(message)];
+    const memory = { cap: memoryCapFor(ai), autoSave: ai?.memory?.autoSave === true };
+    const tools = [
+        pollTool(message),
+        reminderTool(message),
+        memoryTool(message, memory),
+        forgetMemoryTool(message, memory)
+    ];
 
     // Offered only to someone who could act on it. The executors check the same
     // permissions again — this is about not putting a tool in front of a model
@@ -264,4 +368,4 @@ function buildBotTools(message, { enabled = true } = {}) {
     return tools;
 }
 
-module.exports = { buildBotTools, BOT_SERVER, MAX_POLL_OPTIONS };
+module.exports = { buildBotTools, BOT_SERVER, MAX_POLL_OPTIONS, normalizeMemory };

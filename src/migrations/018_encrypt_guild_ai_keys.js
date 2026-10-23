@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const {
-    encryptSecret, decryptSecret, isEncrypted, encryptionEnabled,
+    encryptSecret, decryptSecret, isEncrypted, encryptionEnabled, guildSecretBinding,
 } = require('../config/secretBox');
 
 /**
@@ -28,6 +28,9 @@ const {
 
 /** The Guild.ai paths holding a credential. */
 const KEY_FIELDS = ['openaiKey', 'geminiKey', 'anthropicKey', 'openrouterKey'];
+
+/** What a guild's key at `field` is sealed to (#1152); see the Guild schema setter. */
+const bindingOf = (doc, field) => guildSecretBinding(doc.guildId, `ai.${field}`);
 
 const anyKeySet = { $or: KEY_FIELDS.map(f => ({ [`ai.${f}`]: { $type: 'string', $ne: '' } })) };
 const projection = KEY_FIELDS.reduce((p, f) => ({ ...p, [`ai.${f}`]: 1 }), { guildId: 1 });
@@ -89,7 +92,7 @@ async function encryptStoredGuildKeys() {
             // One update per field, not one per document: a document-wide
             // compare-and-set would let a single field changing underneath us
             // block the other three.
-            if (await compareAndSet(doc._id, field, value, encryptSecret(value))) written++;
+            if (await compareAndSet(doc._id, field, value, encryptSecret(value, bindingOf(doc, field)))) written++;
             else skipped++;
         }
         if (!written) continue;
@@ -126,7 +129,7 @@ async function decryptStoredGuildKeys() {
         for (const field of KEY_FIELDS) {
             const value = doc.ai?.[field];
             if (!isEncrypted(value)) continue;
-            const plain = decryptSecret(value);
+            const plain = decryptSecret(value, bindingOf(doc, field));
             if (plain === null) {
                 throw new Error(`Cannot decrypt ai.${field} for guild ${doc.guildId}.`);
             }
@@ -156,6 +159,9 @@ async function countPlaintextGuildKeys() {
 
 module.exports = {
     name: '018_encrypt_guild_ai_keys',
+    compareAndSet,
+    guildsWithKeys,
+    bindingOf,
 
     async up() {
         if (!encryptionEnabled()) {

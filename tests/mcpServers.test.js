@@ -14,9 +14,14 @@ const {
     getMcpServers,
     resolveMcpServers,
     usesOAuth,
+    needsClientRoute,
+    effectiveMcpRoute,
     buildAnthropicMcpParams,
     forGuild,
-    ownerOf
+    ownerOf,
+    forMember,
+    isMemberList,
+    DEFAULT_MCP_APPROVER
 } = require('../src/config/mcpServers');
 const { encryptSecret, _resetSecretBox } = require('../src/config/secretBox');
 
@@ -555,6 +560,52 @@ describe('a config-file server scoped to named guilds', () => {
     });
 });
 
+// The AI-layer audit: every connection used to be every member's, a personal
+// mailbox connected with OAuth included, and a member could approve their own
+// write on it.
+describe('who may use a connection', () => {
+    const grant = { guildId: 'g1', issuer: 'https://auth.example.com', clientId: 'cid', accessToken: 'enc:at' };
+    const stored = () => [
+        { name: 'mail', url: 'https://mail.example.com/mcp', oauth: grant },
+        { name: 'docs', url: 'https://docs.example.com/mcp' }
+    ];
+
+    beforeEach(() => {
+        writeConfig({ servers: [
+            { name: 'calendar', url: 'https://cal.example.com/mcp', managers_only: true },
+            { name: 'wiki', url: 'https://wiki.example.com/mcp' },
+            { name: 'notes', command: 'node', args: ['notes.js'], managers_only: true }
+        ] });
+        load();
+    });
+
+    const names = list => resolveMcpServers(list).map(s => s.name).sort();
+
+    test('a manager reaches every connection', () => {
+        expect(names(forMember(forGuild('g1', stored()), true))).toEqual(['calendar', 'docs', 'mail', 'notes', 'wiki']);
+    });
+
+    test('a member does not reach an OAuth connection, nor one marked managers_only', () => {
+        expect(names(forMember(forGuild('g1', stored()), false))).toEqual(['docs', 'wiki']);
+    });
+
+    test('marking a list keeps whose it is', () => {
+        const list = forMember(forGuild('g1', stored()), false);
+        expect(ownerOf(list)).toBe('g1');
+        expect(isMemberList(list)).toBe(true);
+        expect(isMemberList(forGuild('g1', stored()))).toBe(false);
+    });
+
+    test('the connector route sees the same narrower list', () => {
+        const params = buildAnthropicMcpParams(forMember(forGuild('g1', stored()), false));
+        expect(params.mcp_servers.map(s => s.name).sort()).toEqual(['docs', 'wiki']);
+    });
+
+    test('approval is for managers unless a guild says otherwise', () => {
+        expect(DEFAULT_MCP_APPROVER).toBe('managers');
+    });
+});
+
 // #1146. Dashboard tokens are stored encrypted and opened here, the one reader.
 describe('a stored dashboard token', () => {
     const KEY = 'mcp-token-test-key';
@@ -592,5 +643,129 @@ describe('a stored dashboard token', () => {
         process.env.SECRET_ENCRYPTION_KEY = 'a-different-key';
         _resetSecretBox();
         expect(resolveMcpServers([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: sealed }])).toEqual([]);
+    });
+});
+
+// A server on the operator's own network — a self-hosted git or notes server —
+// is reachable only if the operator's config file says so, entry by entry.
+describe('allow_private', () => {
+    const LAN = 'http://192.168.1.20:3000/mcp';
+
+    test('lets a config-file entry use a private, plain-http address', () => {
+        writeConfig({ servers: [{ name: 'vault', url: LAN, allow_private: true, guilds: ['g1'] }] });
+        const { servers, warnings } = load();
+        expect(warnings).toEqual([]);
+        expect(servers[0]).toMatchObject({ privateNetwork: true, connection: { url: LAN, allowPrivate: true } });
+    });
+
+    test('without it, the file still needs https and says how to opt in', () => {
+        writeConfig({ servers: [{ name: 'vault', url: LAN }] });
+        const { servers, warnings } = load();
+        expect(servers).toEqual([]);
+        expect(warnings[0]).toMatch(/allow_private/);
+    });
+
+    test('still refuses a credential in the URL or a scheme that is not http(s)', () => {
+        writeConfig({ servers: [
+            { name: 'creds', url: 'http://u:p@10.0.0.2/mcp', allow_private: true },
+            { name: 'ftp', url: 'ftp://10.0.0.2/mcp', allow_private: true }
+        ] });
+        const { servers, warnings } = load();
+        expect(servers).toEqual([]);
+        expect(warnings).toHaveLength(2);
+    });
+
+    test('a dashboard entry can never set it', () => {
+        writeConfig({ servers: [] });
+        load();
+        const resolved = resolveMcpServers(forGuild('g1', [
+            { name: 'sneaky', url: 'https://mcp.example.com/mcp', allowPrivate: true, allow_private: true }
+        ]));
+        expect(resolved[0].privateNetwork).toBeUndefined();
+        expect(resolved[0].connection.allowPrivate).toBeUndefined();
+
+        // And a private http URL from the dashboard is not accepted at all.
+        expect(resolveMcpServers(forGuild('g1', [{ name: 'lan', url: LAN, allowPrivate: true }]))).toEqual([]);
+    });
+
+    test('a dashboard entry of the same name replaces the file\'s, flag and all', () => {
+        writeConfig({ servers: [{ name: 'vault', url: LAN, allow_private: true }] });
+        load();
+        const [resolved] = resolveMcpServers(forGuild('g1', [{ name: 'vault', url: 'https://mcp.example.com/mcp' }]));
+        expect(resolved.connection).not.toHaveProperty('allowPrivate');
+        expect(resolved.connection.url).toBe('https://mcp.example.com/mcp');
+    });
+
+    test('is kept off Anthropic\'s connector, which cannot reach it, and forces the bot\'s own client', () => {
+        writeConfig({ servers: [
+            { name: 'vault', url: LAN, allow_private: true },
+            { name: 'docs', url: 'https://mcp.example.com/docs' }
+        ] });
+        load();
+        const params = buildAnthropicMcpParams(forGuild('g1', []));
+        expect(params.mcp_servers.map(server => server.name)).toEqual(['docs']);
+        expect(needsClientRoute(forGuild('g1', []))).toBe(true);
+        expect(effectiveMcpRoute('connector', 'off', forGuild('g1', []))).toBe('client');
+    });
+});
+
+// A server the bot runs as a local process (`command`) — config file only.
+describe('stdio servers', () => {
+    const entry = (extra = {}) => ({ name: 'vault', command: 'npx', args: ['-y', 'obsidian-mcp', '/vault'], ...extra });
+
+    test('a config-file entry with a command becomes a local process', () => {
+        writeConfig({ servers: [entry({ env: { VAULT_TOKEN: 'abc' }, cwd: '/srv', guilds: ['g1'], unattended_tools: ['write_note'] })] });
+        const { servers, warnings } = load();
+        expect(warnings).toEqual([]);
+        expect(servers[0]).toMatchObject({
+            name: 'vault',
+            stdio: true,
+            guilds: ['g1'],
+            connection: { stdio: { command: 'npx', args: ['-y', 'obsidian-mcp', '/vault'], env: { VAULT_TOKEN: 'abc' }, cwd: '/srv' } }
+        });
+        expect(servers[0].toolset.unattended_tools).toEqual(['write_note']);
+    });
+
+    test('env values and args may be ${VAR} references, and a missing one skips the server', () => {
+        process.env.TEST_VAULT_TOKEN = 'from-env';
+        process.env.TEST_VAULT_DIR = '/data/vault';
+        try {
+            writeConfig({ servers: [entry({ args: ['${TEST_VAULT_DIR}'], env: { TOKEN: '${TEST_VAULT_TOKEN}' } })] });
+            expect(load().servers[0].connection.stdio).toMatchObject({ args: ['/data/vault'], env: { TOKEN: 'from-env' } });
+
+            writeConfig({ servers: [entry({ env: { TOKEN: '${TEST_NOT_SET_ANYWHERE}' } })] });
+            const { servers, warnings } = load();
+            expect(servers).toEqual([]);
+            expect(warnings.join(' ')).toMatch(/TEST_NOT_SET_ANYWHERE/);
+        } finally {
+            delete process.env.TEST_VAULT_TOKEN;
+            delete process.env.TEST_VAULT_DIR;
+        }
+    });
+
+    test.each([
+        ['an empty command', { command: '  ' }],
+        ['args that are not strings', { args: ['ok', 3] }],
+        ['env that is not an object', { env: ['A=1'] }],
+        ['an env name that is not a variable name', { env: { 'A B': '1' } }]
+    ])('skips %s with a warning', (_label, extra) => {
+        writeConfig({ servers: [entry(extra)] });
+        const { servers, warnings } = load();
+        expect(servers).toEqual([]);
+        expect(warnings).toHaveLength(1);
+    });
+
+    test('a dashboard entry can never name a command', () => {
+        writeConfig({ servers: [] });
+        load();
+        expect(resolveMcpServers(forGuild('g1', [entry()]))).toEqual([]);
+        expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/only the operator's config file/));
+    });
+
+    test('is never offered to Anthropic\'s connector, and forces the bot\'s own client', () => {
+        writeConfig({ servers: [entry(), { name: 'docs', url: 'https://mcp.example.com/docs' }] });
+        load();
+        expect(buildAnthropicMcpParams(forGuild('g1', [])).mcp_servers.map(server => server.name)).toEqual(['docs']);
+        expect(needsClientRoute(forGuild('g1', []))).toBe(true);
     });
 });

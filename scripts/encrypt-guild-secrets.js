@@ -28,6 +28,7 @@ require('../src/config/fileSecrets').loadFileSecrets();
 const mongoose = require('mongoose');
 const { encryptStoredGuildKeys } = require('../src/migrations/018_encrypt_guild_ai_keys');
 const { encryptStoredMcpTokens } = require('../src/migrations/027_encrypt_mcp_tokens');
+const { bindStoredGuildKeys } = require('../src/migrations/029_bind_guild_ai_keys');
 const { encryptionEnabled } = require('../src/config/secretBox');
 
 async function main() {
@@ -56,6 +57,13 @@ async function main() {
                 'That is expected when a guild admin saves a key mid-sweep — the dashboard encrypts on ' +
                 'write, so nothing is left in the clear. Re-run this to confirm.'
             );
+        }
+
+        // Keys sealed before #1152 open for any guild; bind them to their own.
+        const bound = await bindStoredGuildKeys();
+        if (bound.keys) console.log(`Bound ${bound.keys} guild AI provider key(s) to their guild and field.`);
+        if (bound.unreadable) {
+            console.log(`${bound.unreadable} key(s) could not be opened with this SECRET_ENCRYPTION_KEY and were left as found.`);
         }
 
         // The MCP connections' static tokens (#1146), the same sweep over the

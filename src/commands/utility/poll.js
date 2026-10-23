@@ -43,6 +43,7 @@ module.exports = {
             options,
             endsAt,
             createdBy: interaction.user.tag,
+            createdById: interaction.user.id,
         });
     }
 };

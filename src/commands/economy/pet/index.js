@@ -20,12 +20,15 @@ const {
 const { petAutocomplete } = require('./autocomplete');
 const { executeAdopt } = require('./adopt');
 const { executeStatus } = require('./status');
-const { executeFeed } = require('./feed');
+const { executeFeed, MAX_FEED_QUANTITY } = require('./feed');
 const { executeRelease } = require('./release');
 const { executeRename } = require('./rename');
 const { executeList, rareCompanionFooter } = require('./list');
 const { executeLeaderboard } = require('./leaderboard');
 const { executeBattle } = require('./battle');
+const { executeCodex } = require('./codex');
+const { executeVacation } = require('./vacation');
+const { VACATION_MAX_DAYS } = require('../../../services/petService');
 
 module.exports = {
     cooldown: 5,
@@ -61,6 +64,10 @@ module.exports = {
                 .addStringOption(opt =>
                     opt.setName('slot').setDescription('Which pet to feed (defaults to your first)').setRequired(false).setAutocomplete(true)
                 )
+                .addIntegerOption(opt =>
+                    opt.setName('quantity').setDescription('Feed up to this many — stops once your pet is full (default 1)')
+                        .setRequired(false).setMinValue(1).setMaxValue(MAX_FEED_QUANTITY)
+                )
         )
         .addSubcommand(sub =>
             sub.setName('release')
@@ -80,29 +87,42 @@ module.exports = {
                 )
         )
         .addSubcommand(sub => sub.setName('list').setDescription('View all available pets in the shop.'))
+        .addSubcommand(sub => sub.setName('codex').setDescription('Every pet species — the ones you have owned, and where the rare ones come from.'))
+        .addSubcommand(sub =>
+            sub.setName('vacation')
+                .setDescription(`Pause hunger for all your pets for up to ${VACATION_MAX_DAYS} days (passives and battles are off meanwhile).`)
+                .addStringOption(opt =>
+                    opt.setName('state').setDescription('Start or end the vacation').setRequired(true)
+                        .addChoices({ name: 'On', value: 'on' }, { name: 'Off', value: 'off' }))
+                .addIntegerOption(opt =>
+                    opt.setName('days').setDescription(`How many days (default ${VACATION_MAX_DAYS})`).setRequired(false)
+                        .setMinValue(1).setMaxValue(VACATION_MAX_DAYS)))
         .addSubcommand(sub =>
             sub.setName('leaderboard')
                 .setDescription('View the top pets in this server.')
                 .addStringOption(opt =>
                     opt.setName('type')
-                        .setDescription('Sort order (default: bond days)')
+                        .setDescription('Sort order (default: bond)')
                         .setRequired(false)
                         .addChoices(
-                            { name: 'Bond Days (Most Loyal)', value: 'bonds' },
+                            { name: 'Bond (Most Loyal)',      value: 'bonds' },
                             { name: 'Level (Highest Level)', value: 'level' },
-                            { name: 'Battle Wins',            value: 'wins'  }
+                            { name: 'PvP Wins (vs members)',  value: 'wins'  },
+                            { name: 'Rating (pet ladder)',    value: 'rating' }
                         )
                 )
         )
         .addSubcommand(sub =>
             sub.setName('battle')
-                .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins).')
+                .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins or rating).')
                 .addUserOption(opt =>
                     opt.setName('opponent').setDescription('Member to challenge (leave empty to fight a wild pet)').setRequired(false))
                 .addStringOption(opt =>
                     opt.setName('slot').setDescription('Which of your pets fights (defaults to your first)').setRequired(false).setAutocomplete(true))
                 .addIntegerOption(opt =>
-                    opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))),
+                    opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))
+                .addBooleanOption(opt =>
+                    opt.setName('rated').setDescription('A rated battle on the pet ladder (requires an opponent; level-matched)').setRequired(false))),
 
     async autocomplete(interaction) {
         return petAutocomplete(interaction);
@@ -119,6 +139,8 @@ module.exports = {
             if (sub === 'list')        return await executeList(interaction);
             if (sub === 'leaderboard') return await executeLeaderboard(interaction);
             if (sub === 'battle')      return await executeBattle(interaction);
+            if (sub === 'codex')       return await executeCodex(interaction);
+            if (sub === 'vacation')    return await executeVacation(interaction);
         } catch (err) {
             console.error('[pet] error:', err);
             const msg = { content: 'Something went wrong with the pet command.', flags: MessageFlags.Ephemeral };

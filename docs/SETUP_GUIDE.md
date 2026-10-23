@@ -64,6 +64,35 @@ Administrator: if a feature misbehaves, grant the specific missing permission
 
 ## AI Integration
 
+Each provider below can be set up two ways: a key per server, entered by that
+server's admins in the dashboard and billed to them, or a bot-wide key in
+`.env` billed to you.
+
+### Who can spend the bot-wide keys
+
+Only the servers you list. Since 5.0.0 a server with no key of its own uses the
+bot-wide one only if its guild ID is in `AI_ENV_KEY_GUILDS` (comma-separated, or
+`*` for every server). Empty means none — otherwise the admin of any server the
+bot is invited to could switch AI on without a key and spend yours. A boot with
+a bot-wide key set and this empty logs a warning saying so.
+
+```env
+AI_ENV_KEY_GUILDS=123456789012345678,234567890123456789
+```
+
+Spend through a bot-wide key is also held to your ceilings, whatever the
+server's own AI limits say (a server's limits can be tighter, never looser —
+and its `0`, which means unlimited, does not lift yours):
+
+| Variable | Default | What it bounds |
+|---|---:|---|
+| `AI_ENV_KEY_USER_LIMIT` | 20 | messages per user per 10 minutes |
+| `AI_ENV_KEY_MONTHLY_COST` | 10 | US dollars per server per month |
+| `AI_ENV_KEY_MONTHLY_TOKENS` | 5000000 | tokens per server per month, for models with no price on file |
+
+Set one to `0` to lift that ceiling. A server using its own key is bound only by
+its own limits.
+
 ### OpenAI
 
 1. Go to [OpenAI Platform](https://platform.openai.com/)
@@ -132,6 +161,31 @@ set it as `OLLAMA_BASE_URL`.
 Set **Model context window** in the dashboard too — see
 [FEATURES.md](FEATURES.md#configuration-options) for why a self-hosted model is
 the case where the bot cannot work it out for itself.
+
+### Web search (SearXNG)
+
+The AI's `web_search` tool queries a [SearXNG](https://docs.searxng.org/)
+instance you run. No API key, and nothing is sent anywhere but your own instance.
+
+1. Allow JSON output in SearXNG's `settings.yml` — without it every search is
+   refused with a 403:
+
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+2. Set `SEARXNG_URL` to the instance, e.g. `http://searxng:8080`. Like
+   `OLLAMA_BASE_URL` it is your own endpoint, so a private or Docker address is
+   fine.
+3. Turn on **Enable web access** in the dashboard, under **AI → Abilities**, in each
+   server that should have it. That switch also gives the AI `read_webpage`,
+   which needs no SearXNG at all.
+
+The tool is offered in chat replies, `/ai task` and scheduled tasks. Each search
+is one tool call against the server's usual per-user and per-guild tool budgets.
 
 ### Choosing between them
 
@@ -227,8 +281,11 @@ the server answers that POST with a 404 or a 405, which is what a server built
 against the 2024-11-05 revision does. Nothing has to be configured either way;
 paste the endpoint the service publishes.
 
-Local **stdio** servers are still out of reach: they are a subprocess on the
-machine running the server, not an address, and the bot connects over HTTP.
+Local **stdio** servers — a program speaking MCP over stdin/stdout rather than
+an address — cannot be added here, because a dashboard field that runs a
+command would let any server admin run programs on the host. The operator can
+add one in the config file with `command` (see *Servers that run as a command*
+below).
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -311,14 +368,91 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. Local stdio servers cannot be reached this way. |
+| `url` | Yes, or `command` | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. For a server that runs as a local program, use `command` instead. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
+| `managers_only` | No | Set `true` to offer this connection only to members with Manage Server: anyone else's AI requests do not see it at all. Use it for a token that is somebody's own account — a mailbox, a calendar. A connection signed in with OAuth is always managers-only. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+| `command` / `args` / `env` / `cwd` | Instead of `url` | Run the server as a local process and speak MCP over its stdin/stdout. Config file only; see below. |
+| `allow_private` | No | Set `true` for a server on your own network — a LAN address, a container on the compose network, or plain `http://`. Config file only; see below. |
+| `confirm_tools` / `unattended_tools` | No | The same two lists as a dashboard connection's **Always ask before these tools** and **Run without asking in scheduled tasks**. |
+
+**Servers on your own network.** Every MCP URL is normally held to a public
+`https://` address, because a dashboard field that could point the bot at a
+private one would let any server admin reach whatever the bot's container can —
+the database, the metadata service, the rest of your LAN. An entry in the config
+file is yours rather than a server admin's, so `"allow_private": true` lifts
+both checks for that entry alone: it may use a private address, and plain
+`http://`. A self-hosted notes or git MCP server is the case it is for:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "url": "http://obsidian-mcp:3000/mcp",
+      "authorization_token": "${VAULT_MCP_TOKEN}",
+      "allow_private": true,
+      "guilds": ["<your server id>"]
+    }
+  ]
+}
+```
+
+What it does not change: a dashboard connection can never set it, and one with
+the same name replaces the file's entry, flag included. The URL still cannot
+carry a username or password. Over `http://` the token travels unencrypted, so
+keep that to a network you trust. Set `guilds` on it, since every server the
+entry reaches can have the bot read and write through it. These servers are
+always reached through the bot's own MCP client, even on Claude, because
+Anthropic's connector dials from Anthropic's side and cannot see your network.
+
+**Servers that run as a command.** Most MCP servers ship as a program that
+speaks MCP over stdin and stdout, not as a web endpoint. Give the entry a
+`command` instead of a `url` and the bot starts that program itself when the
+AI first needs it, stops it after ten idle minutes, and restarts it if it
+crashes:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "command": "node",
+      "args": ["/mcp/obsidian-mcp/dist/index.js", "/vault"],
+      "env": { "VAULT_API_KEY": "${VAULT_API_KEY}" },
+      "guilds": ["<your server id>"],
+      "unattended_tools": ["create_note"]
+    }
+  ]
+}
+```
+
+- **Config file only.** A command in a dashboard field would let any server
+  admin run programs on your host, so a dashboard connection with one is
+  ignored.
+- **It gets almost none of the bot's environment.** The process sees `PATH`,
+  `HOME`, the locale and timezone, and what you list in `env` — never the
+  Discord token, the database URI or the AI keys. `env` values and `args` can be
+  `${VAR}` references, read from the bot's environment when the file loads.
+- **It runs inside the bot's container, as the bot's user.** The published image
+  has Node but not `npm`, `npx`, Python or `uvx`, so install the server into a
+  folder you mount (for example `npm install --prefix ./mcp obsidian-mcp` on the
+  host, mounted at `/mcp`) and point `command` at `node`. Mount anything it works
+  on, such as the vault, as well. For a Python server, or anything heavy, run it
+  as its own container and connect to it by URL with `allow_private` instead.
+- **Keep it in sync yourself.** A notes server edits files on disk. If the vault
+  lives in git, a cron job that pulls and pushes it is what gets those edits
+  anywhere else.
+- **It is shared** by every Discord server its `guilds` list names: one process,
+  one set of tools. Set `guilds`.
+- **A server that cannot start** — a wrong path, a missing package — is reported
+  in the logs and left alone for thirty seconds rather than restarted by every
+  message.
 
 **The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
 references, which the bot reads and never writes — and a refresh token rotates,
@@ -364,6 +498,95 @@ Dashboard tokens are encrypted at rest when `SECRET_ENCRYPTION_KEY` is set, the
 same as provider keys. Migration 027 encrypts the ones already stored, and
 `npm run secrets:encrypt` does the same on demand.
 
+#### A browser for the AI
+
+`read_webpage` reads static HTML, so a page that renders with JavaScript comes
+back empty and one behind a login is out of reach. Playwright publishes an MCP
+server that drives a real headless Chromium: navigate, read the rendered page,
+click, type, take a screenshot. It runs as an optional sidecar, since the bot's
+image has no browser and no npm.
+
+1. Start it. `docker-compose.yml` defines it under the `browser` profile:
+
+   ```bash
+   docker compose --profile browser up -d
+   ```
+
+   It joins `browser-network`, which only it and the bot are on.
+
+2. Add an entry to `config/mcp-servers.json` and restart the bot:
+
+   ```json
+   {
+     "servers": [
+       {
+         "name": "browser",
+         "url": "http://playwright:8931/mcp",
+         "allow_private": true,
+         "guilds": ["<your server id>"],
+         "allowed_tools": [
+           "browser_navigate", "browser_navigate_back", "browser_snapshot",
+           "browser_find", "browser_take_screenshot", "browser_tabs", "browser_close",
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ],
+         "confirm_tools": [
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ]
+       }
+     ]
+   }
+   ```
+
+   The log should then show `[MCP] 1 server(s) from …: browser`, and asking the
+   AI to read a JavaScript-heavy page should show `browser_navigate` and
+   `browser_snapshot` in the reply's tool line.
+
+What the entry does:
+
+- **`allow_private`** is required. The sidecar is a container on your own
+  network, reached over plain `http://`, which a URL is otherwise never allowed
+  to be.
+- **`guilds`** limits it to one Discord server. The bot keeps one connection
+  per server URL, so every guild the entry reaches shares the same browser
+  session, with the same open tabs and cookies.
+- **`allowed_tools`** is an allowlist, so a tool a newer image adds stays off
+  until you add it. Left out on purpose: `browser_evaluate` and
+  `browser_run_code_unsafe` (they run arbitrary script in the page),
+  `browser_file_upload` (it reads files from the sidecar), and the network,
+  console, drag and emulation tools, which a reading assistant has no use for.
+- **`confirm_tools`** puts everything beyond reading behind the **Run it**
+  button. Navigating, reading and screenshots run freely; a click, a keystroke
+  or a form fill waits for a person. A scheduled task has nobody to ask, so it
+  can only read. Don't list these under `unattended_tools`.
+- The model reads a page with `browser_snapshot`, which returns the rendered
+  text. `browser_navigate` on its own reports only where it landed.
+
+**Security.**
+
+- **A logged-in browser is a credential.** The service runs with `--isolated`,
+  so its profile lives in memory and every login is gone when the session or
+  the container ends. If you do want it signed in somewhere, save a Playwright
+  storage state file for an account made for the purpose, mount it read-only,
+  and add `--storage-state /state/state.json` to the service's `command`. Then
+  treat the entry like a token for that account: one guild, everything past
+  navigation behind approval, and no `unattended_tools`.
+- **The browser goes wherever a page tells it.** Page text is untrusted input,
+  and the model reads it, so a page can steer the model to another URL. That is
+  why the sidecar is kept off `db-network` (it can never reach MongoDB) and off
+  `clawdia-network`. It can still reach the bot on `browser-network` and
+  anything your host routes to, such as your LAN or a cloud metadata address,
+  and Playwright's `--blocked-origins` is documented as not being a security
+  boundary. On a host with private services, block the network's subnet at the
+  firewall: `docker network ls` lists it as `<project>_browser-network`,
+  `docker network inspect` on that name gives its subnet, and `DOCKER-USER`
+  rules dropping traffic from it to private ranges close the gap.
+- **The tools are third-party.** Everything the browser reads is sent to your AI
+  provider as a tool result, as for any other MCP server.
+
 #### Checking it works
 
 ```text
@@ -398,11 +621,17 @@ malformed config disables the connector, it never stops the bot from starting.
   straight away. `destructive` and `writes` both read the annotations a server
   publishes about its own tools; they differ over a tool that publishes none,
   which `destructive` lets through and `writes` asks about. `always` asks about
-  every call, reads included. By default a prompt can be answered by whoever
-  asked or by anyone with Manage Server; set **Who can click Run it** to
-  *Only members who can manage this server* when a connection holds credentials
-  ordinary members should not use on their own say-so. The person who asked can
-  still cancel. A prompt expires unanswered after a minute, and the tool then
+  every call, reads included. By default a prompt can be answered only by
+  someone with Manage Server; set **Who can click Run it** to *The member who
+  asked* to let members approve their own calls, which is only a check that the
+  model was not talked into something. The person who asked can still cancel.
+- **Who can use a connection.** A connection signed in with OAuth is
+  somebody's own account, so only members with Manage Server can use it: for
+  anyone else the AI does not see it, in chat, `/ai task` or `/ai mcp prompt`.
+  Any other connection is open to every member who can reach the AI, unless its
+  **Only members who can manage this server** switch is on (or, for a
+  config-file entry, `managers_only`). Scheduled tasks are set up by managers
+  and reach every connection. A prompt expires unanswered after a minute, and the tool then
   does not run.
 - **Questions from a server** are the same idea in reverse. A tool that gets
   halfway and needs one more fact — which environment, which of your three
@@ -434,7 +663,11 @@ malformed config disables the connector, it never stops the bot from starting.
   Anthropic, the one provider with two routes. Their connector opens the
   connections on their side and the bot never sees the calls, so approvals, the
   tool line in replies and the activity rollup do not apply on it. `auto` takes
-  the connector unless approvals are on, `connector` and `client` force either.
+  the connector unless approvals are on; `connector` does the same — an approval
+  policy (`Ask before a tool runs` other than *Never*, or any connection's
+  approval list) or an OAuth connection moves requests to Clawdia's own client,
+  because the connector would otherwise skip the approvals silently. `client`
+  always uses Clawdia's client.
   Every other provider has only ever had the client route.
 - `/ai mcp` gives the same answers in Discord, for admins with Manage Server:
   `servers`, `tools <server>`, `test <server>` and `activity`. All of them
@@ -468,8 +701,9 @@ malformed config disables the connector, it never stops the bot from starting.
   one a call still runs — the model may want the side effect — but what comes
   back says the output did not fit rather than carrying it. Past the clock no
   further call is dialled at all, and no approval prompt is put in front of
-  anyone for a call that will not happen either way. Both are refusals worded so
-  the model can answer around them rather than leaving a reply open.
+  anyone for a call that will not happen either way; the model is asked once
+  more with no tools, so it answers from what it has. Both are refusals worded
+  so the model can answer around them rather than leaving a reply open.
 - A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
   asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public
@@ -645,8 +879,11 @@ SECRET_ENCRYPTION_KEY=the_generated_value
 Keep it somewhere other than the backups it protects — a value stored next to
 the archive it encrypts protects nothing. It is also not recoverable: without
 it the stored per-guild keys cannot be read back. The bot does not break if it
-is lost or rotated (it falls back to the bot-wide `*_API_KEY` variables and logs
-a warning), but every affected server has to re-enter its key in the dashboard.
+is lost or rotated — it logs a warning, and each affected server is told its
+saved key could not be read — but every affected server has to re-enter its key
+in the dashboard. It does not fall back to the bot-wide `*_API_KEY` variables
+for those servers: that would move their spend onto your bill without anyone
+deciding it should.
 
 Keys already saved before the variable was set are rewritten on the next boot,
 by migration `018_encrypt_guild_ai_keys`. If you set it *later* than that — the
@@ -657,8 +894,16 @@ npm run secrets:encrypt
 ```
 
 That is idempotent, so running it again, or after a new server adds a key, does
-nothing. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
-/ `OPENROUTER_API_KEY` variables are unaffected either way — they are read from
+nothing.
+
+Each key is also sealed to its server and field: the guild ID and field name go
+in as authenticated data, so a sealed key copied into another server's settings
+(by anyone with write access to the database) will not open there. Keys sealed
+before 5.0.0 are rebound on the next boot by migration `029_bind_guild_ai_keys`,
+and `npm run secrets:encrypt` rebinds any it finds too.
+
+The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
+`OPENROUTER_API_KEY` variables are unaffected either way — they are read from
 the environment and never stored in the database.
 
 The same key covers the MCP OAuth tokens (`Connecting GitHub from the dashboard`
@@ -795,7 +1040,9 @@ knowing about before an upgrade rather than during one:
 `mongo:7` and the `node:24-alpine` base are pinned by `@sha256:` digest rather
 than by tag, so `docker-compose pull` fetches the exact images the release was
 tested against and a rebuild for a rollback cannot quietly pick up a newer base.
-Dependabot raises the bumps; there is nothing to do by hand.
+Dependabot raises the bumps for the Dockerfile and `docker-compose.yml`. It does
+not read `portainer-stack.yml`, so a compose bump fails CI until the same digest
+is copied into the stack file; that copy is the one step done by hand.
 
 ### Viewing Logs
 
@@ -950,7 +1197,11 @@ That matters more than it usually would, because of what these migrations do:
 **Both stack files set `MIGRATION_BACKUP=require` for you.** Immediately before
 any irreversible migration the runner takes a `mongodump` into
 `MIGRATION_BACKUP_DIR` (default `./backups`, which both stack files mount) named
-`pre-migration-<timestamp>.gz`. Under `require` a backup that fails or cannot be
+`pre-migration-<timestamp>.gz`, readable only by its owner (mode 0600). With
+`BACKUP_ENCRYPTION_PASSPHRASE` set the dump is staged outside that directory and
+sealed the same way the nightly archives are, landing as
+`pre-migration-<timestamp>.gz.enc` — so `./backups` holds no plaintext copy of
+the database. Under `require` a backup that fails or cannot be
 taken aborts the startup, so the destructive step never runs unprotected; the
 image ships `mongodb-tools`, so `mongodump` is on `PATH` there. With
 `MIGRATION_BACKUP` unset — which is what a bare checkout gets — a missing or
@@ -1008,10 +1259,18 @@ covers writing a new migration.
 
 ### Enabling MongoDB authentication
 
-Strongly recommended. MongoDB sits on an internal-only Docker network with no
+Required in production. MongoDB sits on an internal-only Docker network with no
 published ports, but without authentication that isolation is the *only*
 control: any container joined to `db-network` has full, credential-less access
-to the database.
+to the database — the bot included, so an RCE or SSRF in the bot would be read
+and write access to every server's data.
+
+Since 5.0.0 a bot started with `NODE_ENV=production` refuses to boot when
+`MONGODB_URI` carries no credentials (no `user:pass@`, and no `authMechanism=`
+such as X.509). The four variables below are the fix. If you have decided to
+run without authentication anyway — one host you control, nothing else on
+`db-network` — set `MONGODB_ALLOW_NO_AUTH=true` and the refusal becomes a
+warning on every boot.
 
 **Fresh deployment (empty `mongodb_data` volume):** set all four variables
 before the first `docker compose up` (in `.env`, or in the Portainer stack's
@@ -1062,7 +1321,8 @@ docker compose up -d --force-recreate
 
 If a password is ever lost, the recovery path is the reverse: unset the
 variables, `--force-recreate`, and mongod is back to no-auth so the users can
-be recreated. That works because auth here is driven by the environment, which
+be recreated (set `MONGODB_ALLOW_NO_AUTH=true` for that one boot if the bot
+needs to come up meanwhile). That works because auth here is driven by the environment, which
 is also why the variables must not be quietly removed once set.
 
 ### Running MongoDB as a single-node replica set
@@ -1370,7 +1630,18 @@ on the host to bind-mount:
 
 The bot mounts the same location at `/app/backups`, which is where
 `src/migrations/runner.js` puts its pre-migration dump. Those archives are named
-`pre-migration-*.gz` and are pruned on the same schedule.
+`pre-migration-*.gz` (`.gz.enc` when `BACKUP_ENCRYPTION_PASSPHRASE` is set) and
+are pruned on the same schedule.
+
+Every archive is written readable by its owner only (the backup service runs
+with `umask 077`, and so does `scripts/backup.sh`). On a compose host that owner
+is root, so run `verify-backup.sh`, `restore.sh` and `offsite-sync.sh` as root,
+or from root's crontab. The directory itself is worth closing too — the bot
+writes its pre-migration dumps there as uid 1000, so keep that owner:
+
+```bash
+sudo chown 1000 ./backups && sudo chmod 700 ./backups
+```
 
 To copy an archive out of the Portainer volume:
 
@@ -1472,10 +1743,28 @@ Three things are worth knowing:
   will not open is found the night it is taken rather than on the day you need
   it. One that fails either step is quarantined as `.gz.enc.unverified` and does
   not count as that day's backup.
+- **Every sealed archive is tagged, and the tag is checked before a restore.**
+  CBC has no integrity of its own: an altered archive decrypts to garbage and a
+  substituted one decrypts fine. So each `.gz.enc` is written with a
+  `.gz.enc.tag` beside it — a MAC over the ciphertext keyed by the same
+  passphrase — and `restore.sh` and `verify-backup.sh` refuse an archive whose
+  tag is missing or does not match before anything is decrypted or handed to
+  `mongorestore --drop`. `offsite-sync.sh` copies the tags with the archives.
+  Archives sealed before tags existed have none; open one of those with
+  `BACKUP_ALLOW_UNTAGGED=true` on that one command.
 - **Keep the passphrase somewhere other than `./backups`.** A passphrase stored
   beside the archives it protects protects nothing. It is also not recoverable:
   without it those archives cannot be read, so keep it for at least as long as
   the oldest archive you would ever restore.
+
+The connection string, and the database password in it, never goes on a
+command line (#1156). Every `mongodump` and `mongorestore` — the nightly
+service, the pre-migration dump, `backup.sh`, `restore.sh` and
+`verify-backup.sh` — reads `MONGODB_URI` from a 0600 file passed as `--config`
+(MongoDB Database Tools 100.3 or later), because argv is readable by every user
+of the host through `ps`, a process inside a container included.
+`verify-backup.sh` hands `mongosh` the URI in its environment for the same
+reason.
 
 If the passphrase is set and `openssl` is missing from the image, the backup
 container exits at boot rather than writing plaintext — an operator who believes
@@ -1533,10 +1822,11 @@ Two deliberate choices in it:
 - **It does not upload unencrypted archives.** Sending a readable copy of the
   database to a third party is a wider exposure than the one off-site
   replication closes, not a narrower one. Plaintext archives are skipped with a
-  line saying how many — the bot's own `pre-migration-*.gz` dump has no
-  passphrase to seal it with, so one turns up after every irreversible migration
-  and stays for the retention window, and refusing the whole run over it would
-  take the off-site copy away for a month. A run that would send *nothing* is
+  line saying how many — a bot that was not handed
+  `BACKUP_ENCRYPTION_PASSPHRASE` writes its `pre-migration-*.gz` dump in the
+  clear, so one can turn up after an irreversible migration and stay for the
+  retention window, and refusing the whole run over it would take the off-site
+  copy away for a month. A run that would send *nothing* is
   refused instead, which is what an install with no
   `BACKUP_ENCRYPTION_PASSPHRASE` gets. Set
   `BACKUP_REMOTE_ALLOW_PLAINTEXT=true` only when the remote encrypts for you —
@@ -1693,7 +1983,8 @@ only when the set changes.
 
 ### AI Not Working
 
-1. Verify API key is correct
+1. Verify API key is correct. A server with no key of its own needs its guild ID
+   in `AI_ENV_KEY_GUILDS` to use the bot-wide one
 2. Check you have credits/quota remaining
 3. Try switching providers (OpenAI ↔ Gemini)
 4. Check logs for specific error messages

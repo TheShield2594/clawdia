@@ -75,9 +75,14 @@ const FIRST_SERVER_CONFIRM_MODE = 'writes';
  * `auto` is the default because the alternative is a guild turning on approvals
  * and losing them by changing a dropdown on a different tab.
  *
- * One case overrides even `connector`: a connection authorized with OAuth
+ * Two cases override even `connector`. A connection authorized with OAuth
  * (#796) always takes the client route, because an access token expires within
- * the hour and only the bot can refresh it. See `usesOAuth` below.
+ * the hour and only the bot can refresh it. See `usesOAuth` below. And a guild
+ * whose approval policy could stop a call — `mcpConfirm` other than `off`, or
+ * any server with `confirmTools` — takes the client route too (#1149): the
+ * connector runs calls on Anthropic's side where no approval prompt can exist,
+ * so honouring `connector` there would switch the approvals off silently. See
+ * `effectiveMcpRoute` below.
  */
 const MCP_ROUTES = ['auto', 'connector', 'client'];
 const DEFAULT_MCP_ROUTE = 'auto';
@@ -85,17 +90,21 @@ const DEFAULT_MCP_ROUTE = 'auto';
 /**
  * Who may click "Run it" on a tool call that is waiting for approval (#1143).
  *
- *   requester  the member who asked, or anyone with Manage Server (the
- *              default, and what the bot has always done)
- *   managers   only members with Manage Server
+ *   requester  the member who asked, or anyone with Manage Server
+ *   managers   only members with Manage Server (the default)
  *
  * `requester` makes approval a "did you mean it" check: it stops a model that
  * was talked into a call, not a member who wants the call made. A connection
  * holding an admin's credentials — a GitHub token, a mailbox — is one where
  * that difference matters, and `managers` is the setting for it.
+ *
+ * The default was `requester` until the AI-layer audit, which found that it
+ * let any member who could reach the AI approve their own write on the guild's
+ * credentials. A guild that saved `requester` keeps it; silence now reads as
+ * `managers`.
  */
 const MCP_APPROVERS = ['requester', 'managers'];
-const DEFAULT_MCP_APPROVER = 'requester';
+const DEFAULT_MCP_APPROVER = 'managers';
 
 /**
  * Which guild a list of stored servers belongs to (#1139).
@@ -122,6 +131,38 @@ function forGuild(guildId, servers) {
 
 function ownerOf(servers) {
     return (servers && typeof servers === 'object' && owners.get(servers)) || null;
+}
+
+/**
+ * Lists read on behalf of a member without Manage Server.
+ *
+ * Every connection a guild adds used to be every member's: anyone who could
+ * reach the AI could have it search a mailbox or file an issue on the
+ * credentials an admin connected — a personal-assistant setup's mail and
+ * calendar included. A connection that signs in with OAuth is somebody's own
+ * account, so it is the managers' alone; any other connection is too once its
+ * entry says `managers_only: true`. `resolveMcpServers` leaves those out of a
+ * list marked here, which is the one place every route to a server — the tool
+ * loop, Anthropic's connector, resources, prompts — reads its list from.
+ *
+ * The mark rides on the list like the owner does, and for the same reason.
+ * It is a mark for *restriction*, so it must be set at each place a member's
+ * request starts (`forMember`): the chat transport, `/ai task`, and the two
+ * `/ai mcp` subcommands members may run.
+ */
+const memberLists = new WeakSet();
+
+function forMember(servers, canManage) {
+    if (canManage) return servers;
+    const list = Array.isArray(servers) ? [...servers] : [];
+    const owner = ownerOf(servers);
+    if (owner) owners.set(list, owner);
+    memberLists.add(list);
+    return list;
+}
+
+function isMemberList(servers) {
+    return Boolean(servers && typeof servers === 'object' && memberLists.has(servers));
 }
 
 let cache = null;
@@ -230,14 +271,19 @@ function buildToolset(name, raw, label, warnings) {
     // stripped again before the Anthropic request is built.
     const confirm = toolNameList(raw.confirm_tools ?? raw.confirmTools);
     if (confirm.length) toolset.confirm_tools = confirm;
+    // The same kind of policy, read only by scheduled runs: the tools that may
+    // go ahead there although nobody is present to approve them. See
+    // createUnattendedConfirmer in src/services/ai/mcp/approval.js.
+    const unattended = toolNameList(raw.unattended_tools ?? raw.unattendedTools);
+    if (unattended.length) toolset.unattended_tools = unattended;
     return toolset;
 }
 
-// The toolset as the Messages API will accept it. `confirm_tools` is ours and
-// the API rejects a field it does not know, so it comes off here rather than
-// never going on — every other reader wants it.
+// The toolset as the Messages API will accept it. `confirm_tools` and
+// `unattended_tools` are ours and the API rejects a field it does not know, so
+// they come off here rather than never going on — every other reader wants them.
 function apiToolset(toolset) {
-    const { confirm_tools: _ours, ...rest } = toolset;
+    const { confirm_tools: _ours, unattended_tools: _alsoOurs, ...rest } = toolset;
     return rest;
 }
 
@@ -284,6 +330,22 @@ function needsConfirmation(mode, toolset, tool) {
 }
 
 /**
+ * The confirm mode a turn with nobody present runs under: a scheduled run, or a
+ * sub-agent of any task.
+ *
+ * `off` and `destructive` are a guild's answer for a conversation, where the
+ * person who asked is there to see what happened. Unattended, they would let a
+ * write tool run on a timer — steered, possibly, by a page or a tool result the
+ * run read on the way — with no one asked and the per-connection
+ * `unattended_tools` list never consulted, because that list is only read for a
+ * call that needs confirming. So nothing below `writes` applies: a read the
+ * server marked read-only still runs, and anything else goes to the list.
+ */
+function unattendedConfirmMode(mode) {
+    return mode === 'always' ? 'always' : 'writes';
+}
+
+/**
  * Whether one tool is on, according to a toolset built above.
  *
  * The toolset is the single description of a server's tool policy: Anthropic's
@@ -323,6 +385,100 @@ function isToolDeferred(toolset, toolName) {
 // (the API rejects either half on its own, so they are always built together),
 // and the plain url/token pair the bot's own MCP client dials for every other
 // provider.
+// A config-file entry's `guilds` list (#1143): null when absent (every guild),
+// the trimmed ids when present, and false — skip the entry — when malformed.
+function fileGuilds(raw, label, warnings) {
+    if (raw.guilds === undefined) return null;
+    if (!Array.isArray(raw.guilds)) {
+        warnings.push(`${label} "guilds" must be an array of guild ids — skipping it`);
+        return false;
+    }
+    return raw.guilds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim());
+}
+
+// The most arguments and environment entries one command may carry. Generous
+// for any real server; a ceiling so a malformed file is a warning, not a hang.
+const MAX_STDIO_ARGS = 64;
+const MAX_STDIO_ENV = 64;
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * A config-file server the bot runs as a local process and speaks to over
+ * stdin/stdout (src/services/ai/mcp/stdio.js) — the transport most MCP servers
+ * ship with. Config file only: a command in a dashboard field would be remote
+ * code execution for every guild admin, so a guild entry with one is skipped.
+ *
+ * `env` values expand `${VAR}` like a token does, and only what is named there
+ * reaches the process — not the bot's own environment (see INHERITED_ENV).
+ */
+function normalizeStdioServer(raw, name, { label, source, expandEnv, warnings }) {
+    const where = `${label} ("${name}")`;
+    if (source !== 'file') {
+        warnings.push(`${where} names a command, which only the operator's config file may do — skipping it`);
+        return null;
+    }
+    const command = typeof raw.command === 'string' ? raw.command.trim() : '';
+    if (!command) {
+        warnings.push(`${where} "command" must be a non-empty string — skipping it`);
+        return null;
+    }
+    if (raw.url !== undefined) {
+        warnings.push(`${where} has both "command" and "url"; it is run as a command and the url is ignored`);
+    }
+
+    const rawArgs = raw.args === undefined ? [] : raw.args;
+    if (!Array.isArray(rawArgs) || rawArgs.length > MAX_STDIO_ARGS || rawArgs.some(arg => typeof arg !== 'string')) {
+        warnings.push(`${where} "args" must be an array of at most ${MAX_STDIO_ARGS} strings — skipping it`);
+        return null;
+    }
+    const args = [];
+    for (const arg of rawArgs) {
+        // An argument may be a ${VAR} reference too, for a path or a key.
+        const value = ENV_REF_PATTERN.test(arg.trim()) ? resolveSecret(arg, { expandEnv, label: `${where} args`, warnings }) : arg;
+        if (value === null) return null;
+        args.push(value ?? '');
+    }
+
+    const env = {};
+    if (raw.env !== undefined) {
+        if (!raw.env || typeof raw.env !== 'object' || Array.isArray(raw.env) || Object.keys(raw.env).length > MAX_STDIO_ENV) {
+            warnings.push(`${where} "env" must be an object of at most ${MAX_STDIO_ENV} string values — skipping it`);
+            return null;
+        }
+        for (const [key, value] of Object.entries(raw.env)) {
+            if (!ENV_NAME_PATTERN.test(key) || typeof value !== 'string') {
+                warnings.push(`${where} env "${key}" must be a variable name with a string value — skipping the server`);
+                return null;
+            }
+            const resolved = resolveSecret(value, { expandEnv, label: `${where} env ${key}`, warnings });
+            if (resolved === null) return null;
+            env[key] = resolved ?? '';
+        }
+    }
+
+    const cwd = typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null;
+    const guilds = fileGuilds(raw, where, warnings);
+    if (guilds === false) return null;
+
+    const stdio = { command, args, env, ...(cwd ? { cwd } : {}) };
+    // Not a URL anyone dials. It names the connection in logs, the pool and the
+    // dashboard, and never leaves the bot: a stdio server is never offered to
+    // Anthropic's connector (see `needsClientRoute`).
+    const url = `stdio:${name}`;
+    return {
+        name,
+        source,
+        server: { type: 'url', url, name },
+        resources: raw.resources === true || raw.use_resources === true,
+        oauth: false,
+        stdio: true,
+        managersOnly: raw.managers_only === true || raw.managersOnly === true,
+        ...(guilds ? { guilds } : {}),
+        connection: { url, authorizationToken: null, oauth: null, stdio },
+        toolset: buildToolset(name, raw, where, warnings)
+    };
+}
+
 function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId = null }) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         warnings.push(`${label} is not an object — skipping it`);
@@ -335,6 +491,9 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         warnings.push(`${label} needs a "name" of letters, digits, underscores or hyphens — skipping it`);
         return null;
     }
+
+    // A local process rather than a URL (`command`), config file only.
+    if (raw.command !== undefined) return normalizeStdioServer(raw, name, { label, source, expandEnv, warnings });
 
     const url = resolveSecret(raw.url, { expandEnv, label: `${label} ("${name}") url`, warnings });
     if (url === null) return null;
@@ -349,8 +508,26 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         warnings.push(`${label} ("${name}") url is not a valid URL — skipping it`);
         return null;
     }
-    if (parsed.protocol !== 'https:') {
-        warnings.push(`${label} ("${name}") url must start with https:// — skipping it`);
+    // A config-file entry may say the server is on the operator's own network
+    // (`allow_private: true`): a git or notes server on the LAN, a container on
+    // the compose network. The file is the operator's, like OLLAMA_BASE_URL and
+    // SEARXNG_URL, so it may dial the private address space and plain http that
+    // every dashboard URL is kept out of. A dashboard entry can never set this —
+    // a guild admin pointing the bot inside its host's network is the SSRF this
+    // whole guard exists for — and a dashboard entry of the same name replaces
+    // the file's, flag and all, so it cannot borrow it either.
+    const privateNetwork = source === 'file' && (raw.allow_private === true || raw.allowPrivate === true);
+    if (privateNetwork) {
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            warnings.push(`${label} ("${name}") url must start with http:// or https:// — skipping it`);
+            return null;
+        }
+        if (parsed.username || parsed.password) {
+            warnings.push(`${label} ("${name}") url must not contain a username or password — put it in authorization_token — skipping it`);
+            return null;
+        }
+    } else if (parsed.protocol !== 'https:') {
+        warnings.push(`${label} ("${name}") url must start with https://${source === 'file' ? ' (or set "allow_private": true for a server on your own network)' : ''} — skipping it`);
         return null;
     }
 
@@ -426,14 +603,8 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
     // file's credentials are the operator's, and without a list they reach
     // every guild that turns AI on. Absent means every guild, which is what the
     // file has always meant; an empty list means none.
-    let guilds = null;
-    if (source === 'file' && raw.guilds !== undefined) {
-        if (!Array.isArray(raw.guilds)) {
-            warnings.push(`${label} ("${name}") "guilds" must be an array of guild ids — skipping it`);
-            return null;
-        }
-        guilds = raw.guilds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim());
-    }
+    const guilds = source === 'file' ? fileGuilds(raw, `${label} ("${name}")`, warnings) : null;
+    if (guilds === false) return null;
 
     return {
         name,
@@ -445,11 +616,19 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         // token and cannot work on Anthropic's connector, so the routing below
         // reads this rather than whether a grant was handed over.
         oauth: Boolean(hasGrant),
+        // Who may use it: an OAuth connection is somebody's own account, so
+        // it is always managers-only; anything else is when its entry says so
+        // (see forMember).
+        managersOnly: Boolean(hasGrant) || raw.managers_only === true || raw.managersOnly === true,
+        // On the operator's network, so only the bot's own client can reach it:
+        // Anthropic's connector dials from Anthropic's side, where a LAN address
+        // means nothing. Routed like an OAuth connection for the same reason.
+        ...(privateNetwork ? { privateNetwork: true } : {}),
         ...(guilds ? { guilds } : {}),
         // What src/services/ai/mcp/ connects to when the guild is not on
         // Anthropic. Same url and same token — only the side that opens the
         // socket differs.
-        connection: { url, authorizationToken: token || null, oauth: grant },
+        connection: { url, authorizationToken: token || null, oauth: grant, ...(privateNetwork ? { allowPrivate: true } : {}) },
         toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings)
     };
 }
@@ -562,7 +741,8 @@ function resolveMcpServers(guildServers = [], { guildId = ownerOf(guildServers) 
         for (const warning of warnings) console.warn(`[MCP] ${warning}`);
     }
 
-    return [...byName.values()];
+    const resolved = [...byName.values()];
+    return isMemberList(guildServers) ? resolved.filter(server => !server.managersOnly) : resolved;
 }
 
 /**
@@ -581,6 +761,15 @@ function usesOAuth(guildServers = []) {
 }
 
 /**
+ * Whether any server can only be reached through the bot's own MCP client: an
+ * OAuth connection (only the bot can refresh its token), one on the operator's
+ * private network, or a local process (Anthropic's side can reach neither).
+ */
+function needsClientRoute(guildServers = []) {
+    return resolveMcpServers(guildServers).some(server => server.oauth || server.privateNetwork || server.stdio);
+}
+
+/**
  * Whether this guild's policy would stop any tool call to ask a person.
  *
  * What `auto` turns on the client path for. A mode of anything but off could
@@ -593,6 +782,20 @@ function usesOAuth(guildServers = []) {
 function requiresApproval(mode, guildServers = []) {
     if (typeof mode === 'string' && mode !== 'off' && CONFIRM_MODES.includes(mode)) return true;
     return resolveMcpServers(guildServers).some(server => server.toolset?.confirm_tools?.length);
+}
+
+/**
+ * The route a Claude request actually takes: 'client' or 'connector'.
+ *
+ * `connector` is a preference, and it gives way to anything that only works on
+ * the client route — an OAuth connection (#796) or an approval policy (#1149).
+ * `auto` resolves the same way; the two settings differ only in the one
+ * request-time case `usesClientRoute` in providers/anthropic.js adds.
+ */
+function effectiveMcpRoute(route, mode, guildServers = []) {
+    if ((route || DEFAULT_MCP_ROUTE) === 'client') return 'client';
+    if (needsClientRoute(guildServers)) return 'client';
+    return requiresApproval(mode, guildServers) ? 'client' : 'connector';
 }
 
 /**
@@ -610,7 +813,9 @@ function buildAnthropicMcpParams(guildServers = []) {
     // not be built (the server is down, the grant was revoked) and the caller
     // then falls through to this. Dropping them here is what makes that
     // fall-through safe wherever it happens.
-    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth);
+    // A private-network server is dropped for the same reason: Anthropic would
+    // be handed an address only the bot's host can reach.
+    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth && !server.privateNetwork && !server.stdio);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
@@ -634,15 +839,20 @@ module.exports = {
     DEFAULT_MCP_APPROVER,
     forGuild,
     ownerOf,
+    forMember,
+    isMemberList,
     guildServersAllowed,
     requiresApproval,
+    effectiveMcpRoute,
     isToolEnabled,
     isToolDeferred,
     toolAnnotations,
     needsConfirmation,
+    unattendedConfirmMode,
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,
     usesOAuth,
+    needsClientRoute,
     buildAnthropicMcpParams
 };

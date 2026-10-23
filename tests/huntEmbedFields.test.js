@@ -110,16 +110,23 @@ describe('hunt success embed field budget', () => {
 
     test('the maximal case really did populate the optional fields', () => {
         const names = fieldsOf(embed).map(f => f.name).join(' | ');
-        for (const expected of ['Multipliers', 'Traits', 'Trait Effects', 'Special Drop', 'Level Up', 'Buffs Expired', 'Weapon Broke', 'Rare Pity', 'Ammo', 'Low Ammo']) {
+        for (const expected of ['Traits', 'Special Drop', 'Level Up', 'Daily Limits', 'Heads Up', 'Kit']) {
             expect(names).toContain(expected);
         }
+        const byName = Object.fromEntries(fieldsOf(embed).map(f => [f.name, f.value]));
+        expect(embed.data.description).toContain('📈');
+        expect(byName['🧬 Traits']).toContain('•');
+        expect(byName['⚠️ Heads Up']).toContain('has broken');
+        expect(byName['⚠️ Heads Up']).toContain('rounds left');
+        expect(byName['🎒 Kit']).toContain('Rare pity');
+        expect(byName['🎒 Kit']).toContain('Steel Shot ×3');
     });
 
-    test('bait and charm expiry share one field', () => {
-        const expired = fieldsOf(embed).filter(f => f.name.includes('Expired'));
-        expect(expired).toHaveLength(1);
-        expect(expired[0].value).toContain('worn off');
-        expect(expired[0].value.split('\n')).toHaveLength(2);
+    test('everything that asks the player to act shares one Heads Up field', () => {
+        const headsUp = fieldsOf(embed).filter(f => f.name === '⚠️ Heads Up');
+        expect(headsUp).toHaveLength(1);
+        const lines = headsUp[0].value.split('\n');
+        expect(lines.filter(l => l.includes('worn off'))).toHaveLength(2);
     });
 
     test('every field respects Discord name/value limits', () => {
@@ -209,9 +216,9 @@ describe('ammo visibility', () => {
         }, userWithAmmo(3), ZONES.murky_swamp, brokenWeapon, '💰', discordUser);
 
         for (const embed of [success, failure]) {
-            const names = fieldsOf(embed).map(f => f.name);
-            expect(names).toContain('Ammo');
-            expect(names).toContain('⚠️ Low Ammo');
+            const byName = Object.fromEntries(fieldsOf(embed).map(f => [f.name, f.value]));
+            expect(byName['🎒 Kit']).toContain('Steel Shot ×3');
+            expect(byName['⚠️ Heads Up']).toContain('Steel Shot (20)');
         }
     });
 });

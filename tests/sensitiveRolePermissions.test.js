@@ -10,6 +10,7 @@ const {
     SENSITIVE_ROLE_PERMISSIONS,
     sensitivePermissionsOf,
     describeSensitivePermissions,
+    grantableRole,
 } = require('../src/utils/sensitiveRolePermissions');
 
 describe('sensitivePermissionsOf', () => {
@@ -61,5 +62,33 @@ describe('describeSensitivePermissions', () => {
     it('handles an empty or missing list', () => {
         expect(describeSensitivePermissions([])).toBe('');
         expect(describeSensitivePermissions()).toBe('');
+    });
+});
+
+// #1141: level rewards, shop items, /role add, the prestige elite role and the
+// birthday role all grant through this, so a privileged role is refused there.
+describe('grantableRole', () => {
+    const guildWith = (...roles) => ({ id: 'g1', roles: { cache: new Map(roles.map(r => [r.id, r])) } });
+    let errorSpy;
+
+    beforeEach(() => { errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {}); });
+    afterEach(() => errorSpy.mockRestore());
+
+    it('hands back an ordinary role', () => {
+        const role = { id: 'r1', permissions: PermissionFlagsBits.SendMessages };
+        expect(grantableRole(guildWith(role), 'r1', 'test', 'u1')).toBe(role);
+        expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses a role carrying a deny-set permission, and logs it', () => {
+        const role = { id: 'r1', permissions: PermissionFlagsBits.Administrator };
+        expect(grantableRole(guildWith(role), 'r1', 'level-reward', 'u1')).toBeNull();
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[level-reward] refusing to grant privileged role r1'));
+    });
+
+    it('is null for a role the guild no longer has, or no role at all', () => {
+        expect(grantableRole(guildWith(), 'gone', 'test')).toBeNull();
+        expect(grantableRole(guildWith(), null, 'test')).toBeNull();
+        expect(grantableRole(null, 'r1', 'test')).toBeNull();
     });
 });

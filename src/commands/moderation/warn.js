@@ -2,6 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } =
 const Case = require('../../models/Case');
 const { logModeration } = require('../../services/moderationLogService');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
+const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
+const { sendPublicResponse, sendEphemeralResponse } = require('../../utils/interactionAck');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const { fitDescription, truncate, EMBED_LIMITS } = require('../../utils/embedFields');
@@ -30,6 +32,11 @@ module.exports = {
     // Re-checked inside the gate in events/interactionCreate — the builder line
     // above is only Discord's default, which a guild admin can reassign.
     requiredPermissions: [PermissionFlagsBits.ModerateMembers],
+
+    // `add` is acknowledged up front by the dispatcher (#995), like /kick and
+    // /ban: resolveMember below can miss the member cache and fetch from the
+    // gateway. `list` and `remove` reply straight away and are left alone.
+    deferral: interaction => (interaction.options.getSubcommand() === 'add' ? { ephemeral: false } : null),
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 
@@ -38,9 +45,21 @@ module.exports = {
             const reason = interaction.options.getString('reason');
             const bypassRequested = interaction.options.getBoolean('bypass_escalation') === true;
 
-            if (user.bot) return interaction.reply({ content: 'You cannot warn bots.', flags: MessageFlags.Ephemeral });
+            if (user.bot) return sendEphemeralResponse(interaction, { content: 'You cannot warn bots.' });
 
-            await interaction.deferReply();
+            // #1144: /warn skipped the hierarchy check every other moderation
+            // command makes, and a warning is not harmless — enough of them
+            // trip the escalation ladder, which times out, kicks or bans. So a
+            // moderator who could not /kick a senior staffer could warn them
+            // until the bot kicked them instead. A user who is confirmed not in
+            // the guild has no rank to compare and can still be warned; a
+            // lookup that failed is refused rather than read as absence.
+            const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
+            if (indeterminate) {
+                return sendEphemeralResponse(interaction, { content: 'Could not look that member up just now — try again in a moment.' });
+            }
+            const denial = hierarchyDenial(interaction.member, member, 'warn');
+            if (denial) return sendEphemeralResponse(interaction, { content: denial });
 
             try {
                 const triggeringCase = await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
@@ -96,7 +115,7 @@ module.exports = {
                     embed.addFields({ name: 'Escalation', value: `Bypassed — would have triggered ${matchedStep?.action?.toUpperCase()} at ${warningCount} warnings.` });
                 }
 
-                await interaction.editReply({ embeds: [embed] });
+                await sendPublicResponse(interaction, { embeds: [embed] });
                 await user.send(`You have been warned in **${interaction.guild.name}** for: ${reason}`).catch(() => {});
 
                 if (!bypassEscalation && guildSettings?.moderation?.escalation?.enabled) {
@@ -105,7 +124,8 @@ module.exports = {
                         targetUser: user,
                         warningCount,
                         triggeringCase,
-                        client: interaction.client
+                        client: interaction.client,
+                        moderator: interaction.member
                     });
                     if (result?.applied) {
                         await interaction.followUp({
@@ -131,7 +151,7 @@ module.exports = {
             } catch (error) {
                 console.error('Warn error:', error);
                 if (!interaction.replied) {
-                    await interaction.editReply({ content: 'Failed to warn the user.' });
+                    await sendEphemeralResponse(interaction, { content: 'Failed to warn the user.' }).catch(() => {});
                 }
             }
         } else if (sub === 'list') {

@@ -8,8 +8,10 @@ const {
     feedPet,
     getTotalBonus,
     getPetBonus,
+    isPetFull,
+    recordPetInteraction,
+    POTW_DAILY_INTERACTION_CAP,
     HUNGER_DECAY_PER_DAY,
-    REST_DURATION_MS,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     MS_PER_DAY,
@@ -100,22 +102,10 @@ describe('hunger decay is continuous', () => {
     });
 });
 
-describe('resting', () => {
-    test('halves decay for the portion of the window spent resting', () => {
-        const resting = petAged(4 * HOUR, { restUntil: new Date(NOW) });
-        const awake   = petAged(4 * HOUR);
-
-        // 2h rested at half rate + 2h awake at full rate.
-        const expected = 100 - (2 * HOUR * 5 + 2 * HOUR * 10) / MS_PER_DAY;
-        expect(effectiveHunger(resting, NOW)).toBeCloseTo(expected, 6);
-        expect(effectiveHunger(resting, NOW)).toBeGreaterThan(effectiveHunger(awake, NOW));
-    });
-
-    test('rest credit is capped at the rest duration', () => {
-        const pet = petAged(10 * MS_PER_DAY, { restUntil: new Date(NOW) });
-        const fullRate = 100 - 10 * HUNGER_DECAY_PER_DAY;
-        const credit   = (REST_DURATION_MS * (HUNGER_DECAY_PER_DAY - 5)) / MS_PER_DAY;
-        expect(effectiveHunger(pet, NOW)).toBeCloseTo(Math.max(0, fullRate + credit), 6);
+describe('resting is gone (#1182)', () => {
+    test('a stale restUntil from before Train no longer slows decay', () => {
+        const legacy = petAged(4 * HOUR, { restUntil: new Date(NOW) });
+        expect(effectiveHunger(legacy, NOW)).toBeCloseTo(effectiveHunger(petAged(4 * HOUR), NOW), 6);
     });
 });
 
@@ -212,5 +202,110 @@ describe('starvation clock', () => {
         const clinging = { ...petAged(0), hunger: 0, starvingStartAt: new Date(NOW - (RUNAWAY_DAYS - 1) * MS_PER_DAY) };
         expect(checkRunaway([dying], NOW).ranAwayPets).toHaveLength(1);
         expect(checkRunaway([clinging], NOW).ranAwayPets).toHaveLength(0);
+    });
+});
+
+describe('feedPet reports what landed', () => {
+    test('gained is capped by the 100 ceiling while restored stays nominal', () => {
+        const pet = { petId: 'wolf', hunger: 90, lastDecayAt: new Date(NOW) };
+        const fed = feedPet(pet, 'wolf_pelt', NOW);
+        expect(fed).toEqual(expect.objectContaining({ hunger: 100, restored: 25, gained: 10, isFavorite: true }));
+    });
+});
+
+describe('isPetFull', () => {
+    test('matches the rounded hunger bar', () => {
+        expect(isPetFull({ petId: 'wolf', hunger: 99.6, lastDecayAt: new Date(NOW) }, NOW)).toBe(true);
+        expect(isPetFull({ petId: 'wolf', hunger: 99.4, lastDecayAt: new Date(NOW) }, NOW)).toBe(false);
+    });
+});
+
+describe('recordPetInteraction', () => {
+    test('counts up to the daily cap, then stops', () => {
+        const pet = {};
+        const counted = [];
+        for (let i = 0; i < POTW_DAILY_INTERACTION_CAP + 3; i++) counted.push(recordPetInteraction(pet, NOW));
+        expect(counted.filter(Boolean)).toHaveLength(POTW_DAILY_INTERACTION_CAP);
+        expect(pet.weeklyInteractions).toBe(POTW_DAILY_INTERACTION_CAP);
+    });
+
+    test('a new UTC day resets the allowance without touching the weekly total', () => {
+        const pet = {};
+        for (let i = 0; i < POTW_DAILY_INTERACTION_CAP; i++) recordPetInteraction(pet, NOW);
+        expect(recordPetInteraction(pet, NOW)).toBe(false);
+        expect(recordPetInteraction(pet, NOW + MS_PER_DAY)).toBe(true);
+        expect(pet.weeklyInteractions).toBe(POTW_DAILY_INTERACTION_CAP + 1);
+        expect(pet.interactionsToday).toBe(1);
+    });
+});
+
+describe('mood bands line up with the passive bonus', () => {
+    const { getMoodBand, getMoodColor, getMoodAction } = require('../src/services/petService');
+
+    test('the band only turns to "concerning" once the bonus is off', () => {
+        expect(getMoodBand(STARVING_THRESHOLD)).toBe('pleading');
+        expect(getMoodBand(STARVING_THRESHOLD - 0.01)).toBe('concerning');
+        expect(getMoodBand(59)).toBe('pleading');
+        expect(getMoodBand(60)).toBe('content');
+        expect(getMoodBand(90)).toBe('blissful');
+    });
+
+    test('the colour follows the same bands', () => {
+        expect(getMoodColor(STARVING_THRESHOLD)).toBe('#ff9800');
+        expect(getMoodColor(STARVING_THRESHOLD - 1)).toBe('#f44336');
+    });
+
+    test('each species has its own gesture, fed or hungry', () => {
+        const fed    = { petId: 'shark', hunger: 95, lastDecayAt: new Date(NOW) };
+        const hungry = { petId: 'shark', hunger: 10, lastDecayAt: new Date(NOW) };
+        expect(getMoodAction(fed, NOW)).toBe('lazy, lazy circles');
+        expect(getMoodAction(hungry, NOW)).toBe('restless, tightening circles');
+        expect(getMoodAction({ petId: 'nonesuch', hunger: 50 }, NOW)).toBeNull();
+    });
+});
+
+describe('petCompanionLine', () => {
+    const { petCompanionLine } = require('../src/services/petService');
+    const pet = (petId, overrides = {}) => ({
+        petId, name: null, hunger: 100, lastDecayAt: new Date(NOW), personality: 'loyal', level: 1, evolutionStage: 1, ...overrides,
+    });
+
+    test('the pet whose passive the activity uses is the one that speaks', () => {
+        const line = petCompanionLine([pet('fish'), pet('dog'), pet('wolf', { name: 'Ghost' })], 'hunt', NOW);
+        expect(line).toBe('> 🐺 **Ghost** stays close, alert for any sign of danger.');
+    });
+
+    test('a fish never narrates a hunt, but a land pet can stand in', () => {
+        expect(petCompanionLine([pet('fish')], 'hunt', NOW)).toBeNull();
+        expect(petCompanionLine([pet('fish'), pet('cat')], 'mine', NOW)).toContain('**Cat**');
+        expect(petCompanionLine([pet('fish')], 'fish', NOW)).toContain('**Fish**');
+    });
+
+    test('exploration has lines, so the Lantern Owl finally speaks — with its evolved look', () => {
+        const owl = pet('lantern_owl', { name: 'Wick', personality: 'energetic', level: 22, evolutionStage: 3 });
+        expect(petCompanionLine([pet('dog'), owl], 'explore', NOW))
+            .toBe('> 🏮 **Wick** scouts ahead and doubles back to hurry you along!');
+    });
+
+    test('a hungry pet says nothing', () => {
+        expect(petCompanionLine([pet('wolf', { hunger: 5 })], 'hunt', NOW)).toBeNull();
+    });
+});
+
+describe('sanitizePetName', () => {
+    const { sanitizePetName } = require('../src/services/petService');
+
+    test.each([
+        ['<@123456> Rex', 'Rex'],
+        ['**Rex**', 'Rex'],
+        ['sir_fluff', 'sir fluff'],
+        ['@everyone', 'everyone'],
+        ['<#123><@&9>', ''],
+        ['a\nb', 'a b'],
+        ["O'Malley", "O'Malley"],
+        ['🐶 Rex', '🐶 Rex'],
+        ['x'.repeat(40), 'x'.repeat(32)],
+    ])('%j becomes %j', (raw, clean) => {
+        expect(sanitizePetName(raw)).toBe(clean);
     });
 });

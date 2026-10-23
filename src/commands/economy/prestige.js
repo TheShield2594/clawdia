@@ -7,6 +7,7 @@ const User  = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { grantableRole } = require('../../utils/sensitiveRolePermissions');
 const {
     PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor,
 } = require('../../utils/prestige');
@@ -210,7 +211,8 @@ async function handleUp(interaction) {
         const eliteRoleId = guildSettings?.accountPrestige?.eliteRoleId;
         const eliteMin    = guildSettings?.accountPrestige?.eliteRoleMinRank ?? 5;
         if (eliteRoleId && newRank >= eliteMin) {
-            await interaction.member.roles.add(eliteRoleId).catch(() => {});
+            const eliteRole = grantableRole(interaction.guild, eliteRoleId, 'prestige-elite', interaction.user.id);
+            if (eliteRole) await interaction.member.roles.add(eliteRole.id).catch(() => {});
         }
 
         const doneEmbed = new EmbedBuilder()

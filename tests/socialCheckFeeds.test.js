@@ -69,8 +69,14 @@ function xFeed(id, url, channelId, lastPublished = null) {
 
 function makeClient() {
     const send = jest.fn(async () => ({}));
-    const channel = { send, isTextBased: () => true };
-    return { channels: { fetch: jest.fn(async () => channel), cache: new Map() }, send };
+    // One channel per id, in the guild the fixtures pair it with (c1 ↔ g1):
+    // delivery refuses a channel that belongs to another guild (#1140).
+    const channels = new Map();
+    const channelFor = id => {
+        if (!channels.has(id)) channels.set(id, { send, isTextBased: () => true, guildId: `g${String(id).slice(1)}` });
+        return channels.get(id);
+    };
+    return { channels: { fetch: jest.fn(async id => channelFor(id)), cache: new Map() }, send };
 }
 
 // A YouTube subscription following one resolved feed URL.
@@ -93,6 +99,17 @@ beforeEach(() => {
 });
 
 afterEach(() => jest.restoreAllMocks());
+
+test("a subscription whose channel is in another guild is not posted to (#1140)", async () => {
+    const url = 'https://www.youtube.com/feeds/videos.xml?channel_id=UC1';
+    mockFeedBodies.set(url, rssXml());
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [ytFeed('f1', url, 'c2')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    expect(client.send).not.toHaveBeenCalled();
+});
 
 test('a URL followed by many guilds is fetched once and delivered to each', async () => {
     const url = 'https://www.youtube.com/feeds/videos.xml?channel_id=UC1';
@@ -393,7 +410,7 @@ async function sweepEnrichedX(tweet, { nsfw = false, description = '<br><video p
     mockFeedBodies.set(FX_URL, JSON.stringify({ code: 200, message: 'OK', tweet }));
     mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
     const client = makeClient();
-    if (nsfw) (await client.channels.fetch()).nsfw = true;
+    if (nsfw) (await client.channels.fetch('c1')).nsfw = true;
     await checkSocialFeeds(client);
     expect(client.send).toHaveBeenCalledTimes(1);
     return client.send.mock.calls[0][0].embeds.map(e => e.data);

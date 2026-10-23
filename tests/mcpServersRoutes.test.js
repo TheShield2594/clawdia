@@ -517,6 +517,57 @@ describe('using a connection\'s documents as knowledge', () => {
     });
 });
 
+// Who may use a connection at all: off, every member who can reach the AI;
+// on, only members with Manage Server (forMember in config/mcpServers.js).
+describe('the managers-only switch', () => {
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        authorizationToken: 'ghp_good',
+        allowedTools: [],
+        blockedTools: [],
+        confirmTools: []
+    };
+
+    test('round-trips through a save', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { status, body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url, managersOnly: true });
+
+        expect(status).toBe(200);
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(true);
+        expect(body.servers[0].managersOnly).toBe(true);
+    });
+
+    // A client that predates the switch must not lift a restriction by
+    // leaving out a field it has never heard of.
+    test('is kept as stored when the request does not say', async () => {
+        doc = makeDoc([{ ...stored, managersOnly: true }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url });
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(true);
+        expect(body.servers[0].managersOnly).toBe(true);
+    });
+
+    test('is lifted only by an explicit false', async () => {
+        doc = makeDoc([{ ...stored, managersOnly: true }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url, managersOnly: false });
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(false);
+    });
+
+    test('keeps a saved connection away from members', async () => {
+        const { resolveMcpServers, forGuild, forMember } = require('../src/config/mcpServers');
+        const servers = forGuild('g1', [{ ...stored, managersOnly: true }]);
+        expect(resolveMcpServers(forMember(servers, false)).map(s => s.name)).not.toContain('github');
+        expect(resolveMcpServers(forMember(servers, true)).map(s => s.name)).toContain('github');
+    });
+});
+
 describe('the approval policy', () => {
     const stored = {
         name: 'github',
@@ -681,8 +732,15 @@ describe('the route the panel is told about', () => {
         expect((await api('GET', '/guild/g1/mcp-servers')).body.effectiveRoute).toBe('client');
     });
 
-    test('an explicit choice is reported as itself, not re-derived', async () => {
-        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('connector');
+    test('an explicit client choice is reported as itself', async () => {
+        expect((await listWith({ mcpRoute: 'client', mcpConfirm: 'off' })).effectiveRoute).toBe('client');
+    });
+
+    // #1149: the connector cannot put up an approval prompt, so a guild that
+    // asked to be consulted must not lose that by naming the connector.
+    test('an approval policy overrides an explicit connector choice', async () => {
+        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('client');
+        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'off' })).effectiveRoute).toBe('connector');
     });
 });
 

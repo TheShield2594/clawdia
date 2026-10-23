@@ -16,7 +16,10 @@ jest.mock('../src/models/Conversation', () => {
     return Conversation;
 });
 
+jest.mock('../src/models/ConversationLog', () => ({ insertMany: jest.fn(async docs => docs) }));
+
 const Conversation = require('../src/models/Conversation');
+const ConversationLog = require('../src/models/ConversationLog');
 const { loadHistory, appendHistory } = require('../src/services/ai/history');
 
 beforeEach(() => {
@@ -55,4 +58,62 @@ test('a short conversation is kept whole', async () => {
     expect(Conversation.__store.doc.messages).toHaveLength(4);
     const { messages } = await loadHistory('g', 'c', 'u', 20);
     expect(messages).toHaveLength(4);
+});
+
+// The searchable log (ai.conversationSearch) sits beside the retention window,
+// not inside it: what the window drops is exactly what the log is for.
+test('nothing is logged for search unless the guild asked', async () => {
+    await appendExchanges(3, 4);
+    expect(ConversationLog.insertMany).not.toHaveBeenCalled();
+});
+
+test('with search on, both turns are logged, in order, even with no context window', async () => {
+    await appendHistory('g', 'c', 'u', 'where did I park', 'Level 3, bay 12', 0, null, { archive: true });
+
+    const [docs] = ConversationLog.insertMany.mock.calls[0];
+    expect(docs.map(d => [d.role, d.content])).toEqual([['user', 'where did I park'], ['assistant', 'Level 3, bay 12']]);
+    expect(docs[0]).toMatchObject({ guildId: 'g', channelId: 'c', userId: 'u' });
+    expect(docs[1].createdAt.getTime()).toBeGreaterThan(docs[0].createdAt.getTime());
+    expect(Conversation.__store.doc).toBeNull();
+});
+
+test('a log write that fails does not fail the turn', async () => {
+    ConversationLog.insertMany.mockRejectedValueOnce(new Error('db down'));
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(appendHistory('g', 'c', 'u', 'q', 'a', 4, null, { archive: true })).resolves.toBeUndefined();
+    expect(Conversation.__store.doc.messages).toHaveLength(2);
+});
+
+test('a turn that loses a save race is written again rather than dropped', async () => {
+    await appendExchanges(1, 20);
+    const stored = Conversation.__store.doc;
+    // What the retry reads back: the document as the winning writer left it,
+    // fresh, rather than the one this turn already pushed onto.
+    const fresh = new Conversation({
+        guildId: stored.guildId, channelId: stored.channelId, userId: stored.userId,
+        messages: stored.messages.map(message => ({ ...message }))
+    });
+    jest.spyOn(fresh, 'save');
+    // The first save of the next turn loses to a concurrent writer, as two
+    // quick mentions in one conversation do.
+    stored.save = jest.fn(async () => { throw Object.assign(new Error('No matching document'), { name: 'VersionError' }); });
+    Conversation.findOne
+        .mockImplementationOnce(async () => stored)
+        .mockImplementationOnce(async () => fresh);
+
+    await appendHistory('g', 'c', 'u', 'question 2', 'answer 2', 20);
+
+    expect(stored.save).toHaveBeenCalledTimes(1);
+    expect(fresh.save).toHaveBeenCalledTimes(1);
+    const { messages } = await loadHistory('g', 'c', 'u', 20);
+    expect(messages.map(m => m.content).filter(content => content === 'answer 2')).toHaveLength(1);
+});
+
+test('any other save failure is not retried', async () => {
+    await appendExchanges(1, 20);
+    const stored = Conversation.__store.doc;
+    stored.save = jest.fn(async () => { throw new Error('connection reset'); });
+
+    await expect(appendHistory('g', 'c', 'u', 'question 2', 'answer 2', 20)).rejects.toThrow('connection reset');
+    expect(stored.save).toHaveBeenCalledTimes(1);
 });

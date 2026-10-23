@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
+const { grantableRole } = require('../../utils/sensitiveRolePermissions');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -51,6 +52,12 @@ module.exports = {
         if (sub === 'add') {
             if (member.roles.cache.has(role.id)) {
                 return interaction.reply({ content: `You already have the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
+            }
+
+            // The reaction-role path refuses a role carrying admin or moderator
+            // permissions (#1061), and so does this one (#1141).
+            if (!grantableRole(interaction.guild, role.id, 'role-add', interaction.user.id)) {
+                return interaction.reply({ content: `**${role.name}** can't be self-assigned.`, flags: MessageFlags.Ephemeral });
             }
 
             try {

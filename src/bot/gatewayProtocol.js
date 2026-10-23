@@ -24,6 +24,7 @@ const GATEWAY_METHODS = Object.freeze([
     'hasGuild',
     'hasGuilds',
     'canManageGuild',
+    'hasGuildPermissions',
     'getGuild',
     'reach',
     'listChannels',

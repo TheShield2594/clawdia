@@ -839,6 +839,41 @@ const SIZE_TIERS = [
     { id: 'colossal', label: 'Colossal', multiplier: 2.50, weightMult: 3.50, chance: 0.03 }
 ];
 
+// Which weight table a stored weight was rolled against. Weights used to come
+// from a per-tier range, so every rare fish weighed 5–50 lbs whatever it was;
+// they are per species now. A stored record from the old table is not
+// comparable with a new weight, so records carry the scale they were set on
+// and one from another scale is treated as no record at all.
+const FISH_WEIGHT_SCALE = 2;
+
+// Average adult weight range in lbs for each species that is weighed. The size
+// roll (SIZE_TIERS.weightMult) scales it, so a Colossal is about 3.5× a big
+// Average. A species missing here falls back to its tier's range below.
+const FISH_WEIGHTS = {
+    // common
+    minnow: { min: 0.05, max: 0.2 },  perch: { min: 0.3, max: 1.5 },   catfish: { min: 2, max: 15 },
+    bluegill: { min: 0.2, max: 1 },   carp: { min: 3, max: 20 },       tilapia: { min: 1, max: 4 },
+    herring: { min: 0.3, max: 1 },    goldfish: { min: 0.1, max: 0.6 }, sunfish: { min: 0.2, max: 1 },
+    crappie: { min: 0.3, max: 1.5 },
+    // uncommon
+    bass: { min: 1, max: 8 },         trout: { min: 1, max: 8 },       pike: { min: 3, max: 20 },
+    flounder: { min: 1, max: 6 },     snapper: { min: 3, max: 15 },    mackerel: { min: 1, max: 5 },
+    koi: { min: 3, max: 15 },         walleye: { min: 2, max: 10 },    silver_trout: { min: 2, max: 10 },
+    whitefish: { min: 1, max: 6 },    black_crappie: { min: 0.5, max: 2 }, silver_carp: { min: 5, max: 25 },
+    stingray: { min: 10, max: 60 },
+    // rare
+    salmon: { min: 5, max: 30 },      tuna: { min: 30, max: 250 },     swordfish: { min: 50, max: 300 },
+    barracuda: { min: 5, max: 40 },   grouper: { min: 10, max: 80 },   sturgeon: { min: 30, max: 200 },
+    gar: { min: 5, max: 40 },         muskie: { min: 10, max: 40 },    mahi_mahi: { min: 10, max: 40 },
+    lionfish: { min: 0.5, max: 2.5 },
+    // epic
+    marlin: { min: 100, max: 600 },   oarfish: { min: 50, max: 300 },  hammerhead: { min: 150, max: 600 },
+    lake_sturgeon: { min: 40, max: 150 }, reef_shark: { min: 30, max: 130 }, colossal_isopod: { min: 1, max: 4 },
+    // legendary
+    great_white: { min: 1000, max: 3000 }, megalodon: { min: 20000, max: 60000 },
+    phoenix_koi: { min: 20, max: 80 },     ancient_turtle: { min: 300, max: 1500 },
+};
+
 // Base weights in lbs per fish tier (rough scaling)
 const FISH_BASE_WEIGHTS = {
     common:    { min: 0.2, max: 3   },
@@ -1161,113 +1196,100 @@ const FAILURE_SEVERITIES = [
       msg: 'You slipped on the bank and fell in! You need a moment to dry off.' }
 ];
 
+// ─── FIGHT MOVES ──────────────────────────────────────────────────────────────
+// A hooked fish fights, and every fight — the reel-in on a rare-or-better bite
+// and each round of a boss fight — is the same read: see what the fish is
+// doing, answer with the one move that beats it. The three moves are fixed so
+// a player learns them once; the cues are what they have to read each time.
+//
+// `snapCost` is how much line integrity the move costs when it is the wrong
+// answer. Reeling into a fish that is running is the most dangerous mistake;
+// giving line when you should have taken it costs nothing but the round.
+const FIGHT_MOVES = {
+    reel:  { id: 'reel',  label: 'Reel hard',     emoji: '⬆️', snapCost: 2 },
+    hold:  { id: 'hold',  label: 'Hold the drag', emoji: '⚓', snapCost: 1 },
+    slack: { id: 'slack', label: 'Give it line',  emoji: '〰️', snapCost: 0 },
+};
+
+// What the fish does, keyed by the move that answers it. Each line describes
+// behaviour, never the answer, so reading it is the skill.
+const FIGHT_CUES = {
+    reel: [
+        'The line goes slack — it\'s swimming *toward* you!',
+        'It rolls onto its side, spent.',
+        'It turns and drifts back toward you, pulling weakly.',
+        'The pull fades to a lazy tug. It\'s tiring.',
+        'It surfaces and just… floats there, gills heaving.',
+    ],
+    hold: [
+        'It bolts away in one long, straight run.',
+        'A steady, heavy pull — like dragging an anchor.',
+        'It dives deep and holds there, sulking.',
+        'It hugs the bottom and pulls, slow and relentless.',
+        'It powers away against the current, never changing course.',
+    ],
+    slack: [
+        'It thrashes violently at the surface!',
+        'It LEAPS clear out of the water!',
+        'It shakes its head hard — the hook is barely holding!',
+        'It darts wildly left, then right, then left again.',
+        'It spins, wrapping the line around itself!',
+    ],
+};
+
+// Time the reel-in gives for each read, and how many reads a bite asks for.
+// A legendary fights twice. A rare that is misread still lands, smaller.
+const REEL_IN = {
+    rare:      { beats: 1, windowMs: 5000, required: false },
+    epic:      { beats: 1, windowMs: 4500, required: true  },
+    legendary: { beats: 2, windowMs: 4000, required: true  },
+};
+
 // ─── BOSS TYPES ───────────────────────────────────────────────────────────────
-// Each boss type has 3 phases. Each phase has hint text and 3 choices.
-// correctChoice: which choice wins the phase ('match'|'hold'|'safe')
-// strategy: how to play it (exposed to players indirectly through hints)
+// Something big goes for a rare-or-better catch on its way up, and the angler
+// fights it for BOSS_ROUNDS rounds. Each round is a fight cue (above). A boss
+// leans towards its `tendency` — `tendencyWeight` of its rounds — so knowing
+// the boss helps, but every round has to be read: any boss can throw any move.
+const BOSS_ROUNDS = 3;
+const BOSS_LINE_INTEGRITY = 3;
+
 const BOSS_TYPES = {
     leviathan: {
+        id: 'leviathan',
         name: 'Abyssal Leviathan',
         emoji: '🐉',
-        strategy: 'match', // correct: match direction, wrong: hold, neutral: safe
-        phases: [
-            {
-                hint: '**THE ABYSSAL LEVIATHAN** pulls hard to the right!',
-                choices: {
-                    match: { label: '🎯 Match its pull — reel RIGHT', risk: 'high' },
-                    hold:  { label: '⚡ Hold your ground',             risk: 'high' },
-                    safe:  { label: '🔄 Slack the line',              risk: 'none' }
-                },
-                correct: 'match'
-            },
-            {
-                hint: 'It surges LEFT with tremendous force!',
-                choices: {
-                    match: { label: '🎯 Match its pull — reel LEFT',  risk: 'high' },
-                    hold:  { label: '⚡ Brace and hold',              risk: 'high' },
-                    safe:  { label: '🔄 Give it line',                risk: 'none' }
-                },
-                correct: 'match'
-            },
-            {
-                hint: '**The creature is weakening** — one strong pull should do it.',
-                choices: {
-                    match: { label: '💪 Reel with everything you have', risk: 'high' },
-                    hold:  { label: '⚡ Steady, controlled reeling',    risk: 'high' },
-                    safe:  { label: '🔄 Wait for the right moment',    risk: 'none' }
-                },
-                correct: 'match'
-            }
-        ]
+        tendency: 'hold',
+        tendencyWeight: 0.5,
+        intro: 'The water bulges. Something vast from the trench has swallowed your line.',
+        description: 'Pure weight. It sounds for the deep and makes you hold it there.',
     },
     ghost_eel: {
+        id: 'ghost_eel',
         name: 'Ghost Eel',
         emoji: '👻',
-        strategy: 'safe', // correct: safe option, unpredictable
-        phases: [
-            {
-                hint: 'The **Ghost Eel** thrashes erratically — you can\'t predict it!',
-                choices: {
-                    match: { label: '🎯 Try to match its movements', risk: 'high' },
-                    hold:  { label: '⚡ Fight it directly',          risk: 'high' },
-                    safe:  { label: '🔄 Let it tire itself out',     risk: 'none' }
-                },
-                correct: 'safe'
-            },
-            {
-                hint: 'It goes still… then suddenly darts in an unknown direction.',
-                choices: {
-                    match: { label: '🎯 React to the movement',     risk: 'high' },
-                    hold:  { label: '⚡ Hold your position',        risk: 'high' },
-                    safe:  { label: '🔄 Maintain steady tension',   risk: 'none' }
-                },
-                correct: 'safe'
-            },
-            {
-                hint: 'The eel circles the boat — completely unpredictable.',
-                choices: {
-                    match: { label: '🎯 Chase its direction',       risk: 'high' },
-                    hold:  { label: '⚡ Lock the reel',             risk: 'high' },
-                    safe:  { label: '🔄 Patient tension — wait it out', risk: 'none' }
-                },
-                correct: 'safe'
-            }
-        ]
+        tendency: 'slack',
+        tendencyWeight: 0.5,
+        intro: 'A pale shape coils around your catch — the line starts to hum.',
+        description: 'Erratic and violent. Fight it head-on and it will snap you.',
     },
     iron_marlin: {
+        id: 'iron_marlin',
         name: 'Iron Marlin',
         emoji: '⚔️',
-        strategy: 'hold', // correct: hold ground, methodical
-        phases: [
-            {
-                hint: 'The **Iron Marlin** runs in a straight line — methodical, powerful.',
-                choices: {
-                    match: { label: '🎯 Follow its run',            risk: 'high' },
-                    hold:  { label: '⚡ Lock the drag and hold',    risk: 'high' },
-                    safe:  { label: '🔄 Give it some slack',        risk: 'none' }
-                },
-                correct: 'hold'
-            },
-            {
-                hint: 'It turns back — a predictable arc. You can anticipate it.',
-                choices: {
-                    match: { label: '🎯 Mirror its arc',            risk: 'high' },
-                    hold:  { label: '⚡ Counter-reel on the turn',  risk: 'high' },
-                    safe:  { label: '🔄 Maintain even tension',     risk: 'none' }
-                },
-                correct: 'hold'
-            },
-            {
-                hint: 'The Marlin makes its final run — straight and predictable.',
-                choices: {
-                    match: { label: '🎯 Follow its path',           risk: 'high' },
-                    hold:  { label: '⚡ Full drag — reel it in!',   risk: 'high' },
-                    safe:  { label: '🔄 Careful steady pressure',   risk: 'none' }
-                },
-                correct: 'hold'
-            }
-        ]
-    }
+        tendency: 'reel',
+        tendencyWeight: 0.5,
+        intro: 'A bill like a sword flashes past your catch and the reel starts screaming.',
+        description: 'Explosive sprints that burn out fast. Take line back when it tires.',
+    },
+    storm_ray: {
+        id: 'storm_ray',
+        name: 'Storm Ray',
+        emoji: '🌩️',
+        tendency: null,
+        tendencyWeight: 0,
+        intro: 'The sky darkens. A shadow the size of the boat slides beneath your catch.',
+        description: 'No pattern at all. Read every move.',
+    },
 };
 
 module.exports = {
@@ -1295,7 +1317,14 @@ module.exports = {
     FAILURE_SEVERITIES,
     FISH_TRAITS,
     BOSS_TYPES,
+    BOSS_ROUNDS,
+    BOSS_LINE_INTEGRITY,
+    FIGHT_MOVES,
+    FIGHT_CUES,
+    REEL_IN,
     SIZE_TIERS,
+    FISH_WEIGHTS,
+    FISH_WEIGHT_SCALE,
     FISH_BASE_WEIGHTS,
     WEATHER_TYPES,
     WEATHER_LIST,

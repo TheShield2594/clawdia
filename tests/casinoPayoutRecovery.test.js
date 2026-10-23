@@ -43,7 +43,14 @@ jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async ()
 // The retry inside creditCoinsOrOwe sleeps between attempts; three of those per
 // failing payout is the difference between a fast suite and a slow one.
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
+// Fixed spins, when a test queues them: see tests/helpers/slotsSpins.js.
+let mockSpins = [];
+jest.mock('../src/games/casino/slotsReels', () => {
+    const actual = jest.requireActual('../src/games/casino/slotsReels');
+    return { ...actual, spin: (...args) => (mockSpins.length ? mockSpins.shift() : actual.spin(...args)) };
+});
 
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
@@ -51,6 +58,10 @@ const { newHandId, payHand, payoutNote, settledBalance } = require('../src/games
 const { casinoPayoutKey } = require('../src/utils/payoutKey');
 const { walletDoc, makeInteraction, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
 const { makeInteraction: baseInteraction } = require('./helpers/fakeInteraction');
+const { view } = require('./helpers/slotsSpins');
+// Three cherries: an ordinary three-of-a-kind, so there is a payout to pay and
+// no jackpot claim to confuse it with.
+const THREE_CHERRIES = () => view(['Cherry', 'Cherry', 'Cherry']);
 
 const FILTER = { userId: USER_ID, guildId: GUILD_ID };
 
@@ -160,12 +171,11 @@ describe('paying a settled hand', () => {
         // duplicate of the first — and the player would win and not be paid,
         // which is worse than the unkeyed write this replaces.
         const slots = require('../src/games/casino/slots');
-        const random = jest.spyOn(Math, 'random').mockReturnValue(5 / 102);
+        mockSpins = [THREE_CHERRIES(), THREE_CHERRIES()];
         const spin = makeInteraction({ bet: BET });
 
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
-        random.mockRestore();
 
         const settles = keyedCredits()
             .map(({ key }) => key)
@@ -221,13 +231,10 @@ describe('a spin whose payout will not land', () => {
             query.lean = () => Promise.resolve(doc);
             return query;
         });
-        // Three cherries: an ordinary three-of-a-kind, so there is a payout to
-        // lose and no jackpot claim to confuse it with.
-        const random = jest.spyOn(Math, 'random').mockReturnValue(5 / 102);
+        mockSpins = [THREE_CHERRIES()];
 
         const spin = makeInteraction({ bet: BET });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
-        random.mockRestore();
 
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
             service: 'casino',
@@ -289,14 +296,14 @@ describe('a crash cash-out whose write does not land', () => {
     beforeEach(() => {
         deleteLobby(CHANNEL_ID);
         User.updateMany.mockResolvedValue({});
-        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        mockRandom(CRASH_AT_495);
         jest.useFakeTimers();
     });
 
     afterEach(() => {
         deleteLobby(CHANNEL_ID);
         jest.useRealTimers();
-        Math.random.mockRestore();
+        restoreRandom();
     });
 
     test('keeps the marker the restart reconciler pays the stake back from', async () => {
@@ -388,14 +395,14 @@ describe('a cash-out the player pressed for', () => {
     beforeEach(() => {
         deleteLobby(CHANNEL_ID);
         User.updateMany.mockResolvedValue({});
-        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        mockRandom(CRASH_AT_495);
         jest.useFakeTimers();
     });
 
     afterEach(() => {
         deleteLobby(CHANNEL_ID);
         jest.useRealTimers();
-        Math.random.mockRestore();
+        restoreRandom();
     });
 
     test('is told it succeeded, not that it could not be credited', async () => {
@@ -435,9 +442,9 @@ describe('a Lucky Save whose result cannot be rendered', () => {
      * `rollCard` takes two randoms — value then suit — so the sequence is
      * current card, next card, then the save roll. A King followed by an Ace
      * makes "Higher" a loss, and the last value puts the save roll on the true
-     * side of both the charm's flat 20% and the streak's 25%.
+     * side of both saves' rates (CASINO_LUCK.higherlower, 2% each).
      */
-    const LOSES_THEN_SAVES = [0.99, 0, 0, 0, 0.1];
+    const LOSES_THEN_SAVES = [0.99, 0, 0, 0, 0.001];
 
     test.each(['charm', 'streak'])('settles once for the %s save, not again for the failed render', async (kind) => {
         jest.useFakeTimers();
@@ -454,7 +461,7 @@ describe('a Lucky Save whose result cannot be rendered', () => {
             return query;
         });
         const rolls  = [...LOSES_THEN_SAVES];
-        const random = jest.spyOn(Math, 'random').mockImplementation(() => rolls.shift() ?? 0);
+        mockRandom(() => rolls.shift() ?? 0);
 
         // The button ids carry `Date.now()`, which the fake timers pin.
         const now = Date.now();
@@ -470,7 +477,7 @@ describe('a Lucky Save whose result cannot be rendered', () => {
         await jest.advanceTimersByTimeAsync(0);
         for (let i = 0; i < 40; i++) await Promise.resolve();
 
-        random.mockRestore();
+        restoreRandom();
         jest.useRealTimers();
 
         // The save credits the bet and then renders it. A render that threw

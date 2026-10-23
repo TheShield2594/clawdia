@@ -8,8 +8,15 @@ const {
     getPetStats,
     simulateBattle,
     makeWildPet,
+    levelMatched,
     getPetDisplay,
+    PET_DEFINITIONS,
     PET_MAX_LEVEL,
+    WILD_PET_IDS,
+    SPECIES_MOVES,
+    getSpeciesMove,
+    RARE_COMBAT_EDGE,
+    TRAIN_MAX_SESSIONS,
 } = require('../src/services/petService');
 
 /**
@@ -175,5 +182,280 @@ describe('getPetDisplay', () => {
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 1 }).titledName).toBe('Rex');
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 2 }).titledName).toBe('Seasoned Rex');
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 3 }).titledName).toBe('Apex Rex');
+    });
+});
+
+// ─── Review fixes: fairness of who strikes first, and level-matched wagers ─────
+
+describe('simulateBattle fairness', () => {
+    const twin = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+
+    test('a speed tie is decided by the rng, not handed to the challenger', () => {
+        // First roll decides who opens; 0.9 hands it to B.
+        let calls = 0;
+        const rng = () => (calls++ === 0 ? 0.9 : 0.5);
+        const res = simulateBattle(twin, { ...twin }, rng);
+        expect(res.rounds[0].attacker).toBe('b');
+    });
+
+    test('a faster pet opens more often, but not always', () => {
+        const rng = seededRng(0xFA57);
+        const fast = { ...twin, personality: 'energetic' };
+        let bOpened = 0;
+        const N = 2000;
+        for (let i = 0; i < N; i++) if (simulateBattle({ ...twin }, fast, rng).rounds[0].attacker === 'b') bOpened++;
+        expect(bOpened / N).toBeGreaterThan(0.53);
+        expect(bOpened / N).toBeLessThan(0.75);
+    });
+
+    test('an even mirror match is a coin flip for the challenger, not ~78%', () => {
+        const rng = seededRng(0xC0FFEE);
+        let wins = 0;
+        const N = 4000;
+        for (let i = 0; i < N; i++) if (simulateBattle(twin, { ...twin }, rng).winner === 'a') wins++;
+        expect(wins / N).toBeGreaterThan(0.45);
+        expect(wins / N).toBeLessThan(0.55);
+    });
+});
+
+describe('personality balance', () => {
+    // Personality is rolled once at adoption and never changes, so no roll may
+    // be a lasting handicap. Every pairing, both seats, at low, mid and high
+    // level, stays within 42–58% (the tuning keeps it near ±4%).
+    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+
+    test.each([1, 15, 28])('every pairing is close to even at level %i', (level) => {
+        const rng = seededRng(0xBA1A + level);
+        const stage = level >= 20 ? 3 : level >= 10 ? 2 : 1;
+        const N = 1500;
+        for (const x of KEYS) {
+            for (const y of KEYS) {
+                if (x === y) continue;
+                let wins = 0;
+                for (let i = 0; i < N; i++) {
+                    const px = { petId: 'dog', level, evolutionStage: stage, personality: x };
+                    const py = { petId: 'dog', level, evolutionStage: stage, personality: y };
+                    if (simulateBattle(px, py, rng).winner === 'a') wins++;
+                    if (simulateBattle(py, px, rng).winner === 'b') wins++;
+                }
+                const pct = wins / (2 * N);
+                expect([x, y, pct > 0.42 && pct < 0.58]).toEqual([x, y, true]);
+            }
+        }
+    });
+});
+
+describe('training balance (#1182)', () => {
+    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+    const FULL = { power: TRAIN_MAX_SESSIONS, guard: TRAIN_MAX_SESSIONS, agility: TRAIN_MAX_SESSIONS };
+
+    // Seat-balanced win rate of `x` against `y` over 2N fights.
+    function winRate(x, y, rng, N) {
+        let wins = 0;
+        for (let i = 0; i < N; i++) {
+            if (simulateBattle(x, y, rng).winner === 'a') wins++;
+            if (simulateBattle(y, x, rng).winner === 'b') wins++;
+        }
+        return wins / (2 * N);
+    }
+
+    test.each([1, 15, 28])('fully trained pets keep every personality pairing close to even at level %i', (level) => {
+        const rng = seededRng(0x7EA1 + level);
+        const stage = stageForLevel(level);
+        for (const x of KEYS) {
+            for (const y of KEYS) {
+                if (x === y) continue;
+                const pct = winRate(
+                    { petId: 'dog', level, evolutionStage: stage, personality: x, training: FULL },
+                    { petId: 'dog', level, evolutionStage: stage, personality: y, training: FULL },
+                    rng, 500,
+                );
+                expect([x, y, pct > 0.42 && pct < 0.58]).toEqual([x, y, true]);
+            }
+        }
+    });
+
+    // Training has to be worth pressing, and no focus a trap: ten sessions of
+    // any one focus beat an untrained twin, by a similar margin.
+    test.each(['power', 'guard', 'agility'])('a maxed %s focus is a real but modest edge', (focus) => {
+        const rng = seededRng(0xF0C5);
+        const base = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+        const pct = winRate({ ...base, training: { [focus]: TRAIN_MAX_SESSIONS } }, base, rng, 1000);
+        expect([focus, pct > 0.53 && pct < 0.68]).toEqual([focus, true]);
+    });
+
+    // Thirty sessions (ten days of training at the cooldown) are worth about
+    // one level: felt, and never a lock.
+    test('a fully trained pet beats its untrained twin about as often as a level up would', () => {
+        const rng = seededRng(0x1E7E1);
+        const base = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+        const trained = winRate({ ...base, training: FULL }, base, rng, 1000);
+        expect(trained).toBeGreaterThan(0.6);
+        expect(trained).toBeLessThan(0.8);
+    });
+
+    test('training shows in the stats', () => {
+        const base = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+        const plain = getPetStats(base);
+        const full  = getPetStats({ ...base, training: FULL });
+        expect(full.atk).toBeGreaterThan(plain.atk);
+        expect(full.def).toBeGreaterThan(plain.def);
+        expect(full.spd).toBeGreaterThan(plain.spd);
+        expect(full.crit).toBeGreaterThan(plain.crit);
+        expect(full.hp).toBe(plain.hp);
+    });
+
+    test('training travels into a level-matched wager', () => {
+        const [a] = levelMatched({ petId: 'dog', level: 20, evolutionStage: 3, personality: 'loyal', training: { power: 4 } },
+            { petId: 'cat', level: 12, evolutionStage: 2, personality: 'lazy' });
+        expect(a.training).toEqual({ power: 4 });
+    });
+});
+
+describe('species signature moves (#1183)', () => {
+    const SPECIES = [...Object.keys(PET_DEFINITIONS), ...WILD_PET_IDS];
+
+    test('every species, wild ones included, has a named move', () => {
+        for (const id of SPECIES) {
+            const move = getSpeciesMove(id);
+            expect([id, typeof move?.name, typeof move?.desc]).toEqual([id, 'string', 'string']);
+        }
+        expect(Object.keys(SPECIES_MOVES).sort()).toEqual([...SPECIES].sort());
+    });
+
+    test("every species' move fires in the battle log", () => {
+        const rng = seededRng(0x40FE);
+        for (const id of SPECIES) {
+            const name = getSpeciesMove(id).name;
+            let fired = false;
+            for (let i = 0; i < 400 && !fired; i++) {
+                const opp = SPECIES[(SPECIES.indexOf(id) + 1 + (i % (SPECIES.length - 1))) % SPECIES.length];
+                const res = simulateBattle(
+                    { petId: id,  level: 10, evolutionStage: 2, personality: 'loyal' },
+                    { petId: opp, level: 10, evolutionStage: 2, personality: 'loyal' },
+                    rng,
+                );
+                fired = res.rounds.some(r => r.moves.some(m => m.side === 'a' && m.name === name));
+            }
+            expect([id, fired]).toEqual([id, true]);
+        }
+    });
+
+    test('Nine Lives leaves the Cat standing at 1 HP after a lethal hit', () => {
+        // Rolls are low throughout: every chance fires and hits are small, so
+        // the fight goes long enough for a lethal hit to land on the cat.
+        const res = simulateBattle(
+            { petId: 'cat', level: 1, evolutionStage: 1, personality: 'loyal' },
+            { petId: 'dog', level: 30, evolutionStage: 3, personality: 'loyal' },
+            () => 0.01,
+        );
+        const saved = res.rounds.findIndex(r => r.moves.some(m => m.side === 'a' && m.name === 'Nine Lives'));
+        expect(saved).toBeGreaterThanOrEqual(0);
+        expect(res.rounds[saved].hpA).toBe(1);
+        // Only once a fight.
+        expect(res.rounds.filter(r => r.moves.some(m => m.name === 'Nine Lives'))).toHaveLength(1);
+    });
+
+    test("Lantern Flare makes the opponent's next attack miss", () => {
+        const res = simulateBattle(
+            { petId: 'lantern_owl', level: 10, evolutionStage: 2, personality: 'loyal' },
+            { petId: 'dog',         level: 10, evolutionStage: 2, personality: 'loyal' },
+            () => 0.01,
+        );
+        const flare = res.rounds.findIndex(r => r.attacker === 'a' && r.moves.some(m => m.name === 'Lantern Flare'));
+        expect(flare).toBeGreaterThanOrEqual(0);
+        const next = res.rounds[flare + 1];
+        expect(next.attacker).toBe('b');
+        expect(next.missed).toBe(true);
+        expect(next.damage).toBe(0);
+    });
+
+    // Every species pairing's win rate: tests/petSpeciesBalance.test.js, a
+    // file of its own so its 270 pairings run beside the rest of the suite.
+
+    test('the rare edge is a few percent on HP, attack and defence', () => {
+        expect(RARE_COMBAT_EDGE).toBeGreaterThan(0);
+        expect(RARE_COMBAT_EDGE).toBeLessThanOrEqual(0.05);
+        const shop = getPetStats({ petId: 'fox',         level: 15, evolutionStage: 2, personality: 'loyal' });
+        const rare = getPetStats({ petId: 'crystal_fox', level: 15, evolutionStage: 2, personality: 'loyal' });
+        expect(rare.atk / shop.atk).toBeCloseTo((1 + RARE_COMBAT_EDGE + 0) / 1, 1);
+        expect(rare.atk).toBeGreaterThan(shop.atk);
+        expect(rare.spd).toBe(shop.spd);
+    });
+});
+
+describe('levelMatched', () => {
+    test('scales both fighters to the lower level and leaves the originals alone', () => {
+        const high = { petId: 'wolf', name: 'Rex', level: 22, evolutionStage: 3, personality: 'loyal', xp: 9000 };
+        const low  = { petId: 'cat',  name: 'Tom', level: 12, evolutionStage: 2, personality: 'lazy' };
+
+        const [a, b] = levelMatched(high, low);
+
+        expect(a).toEqual({ petId: 'wolf', name: 'Rex', personality: 'loyal', level: 12, evolutionStage: 2 });
+        expect(b).toEqual({ petId: 'cat', name: 'Tom', personality: 'lazy', level: 12, evolutionStage: 2 });
+        expect(high.level).toBe(22);
+        expect(high.evolutionStage).toBe(3);
+    });
+
+    test('a level lead no longer decides a wager', () => {
+        const rng = seededRng(0xBEEF);
+        const high = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+        const low  = { petId: 'cat', level: 10, evolutionStage: 2, personality: 'loyal' };
+        let wins = 0;
+        const N = 4000;
+        for (let i = 0; i < N; i++) {
+            const [a, b] = levelMatched(high, low);
+            if (simulateBattle(a, b, rng).winner === 'a') wins++;
+        }
+        expect(wins / N).toBeGreaterThan(0.45);
+        expect(wins / N).toBeLessThan(0.55);
+    });
+});
+
+describe('getPetDisplay for wild opponents and the Lantern Owl', () => {
+    test('a wild opponent shows its own emoji rather than a paw print', () => {
+        expect(getPetDisplay(makeWildPet(5, () => 0)).emoji).toBe('🐗');
+        expect(getPetDisplay({ petId: 'cave_bat', name: 'Cave Bat' }).emoji).toBe('🦇');
+    });
+
+    test('the Lantern Owl changes look as it evolves', () => {
+        expect(getPetDisplay({ petId: 'lantern_owl', evolutionStage: 1 }).emoji).toBe('🦉');
+        expect(getPetDisplay({ petId: 'lantern_owl', evolutionStage: 3 }).emoji).toBe('🏮');
+    });
+
+    test('no evolved look repeats the stage before it, another species, or the Pet of the Week star', () => {
+        const baseIcons = Object.values(PET_DEFINITIONS).map(d => d.emoji);
+        for (const [petId, def] of Object.entries(PET_DEFINITIONS)) {
+            const looks = [1, 2, 3].map(stage => getPetDisplay({ petId, evolutionStage: stage }).emoji);
+            expect([petId, new Set(looks).size]).toEqual([petId, 3]);
+            for (const look of looks.slice(1)) {
+                const clash = look === '🌟' || baseIcons.some(icon => icon === look && icon !== def.emoji);
+                expect([petId, look, clash]).toEqual([petId, look, false]);
+            }
+        }
+    });
+
+    test('every species has an evolved look at every stage', () => {
+        for (const petId of Object.keys(PET_DEFINITIONS)) {
+            for (const stage of [2, 3]) {
+                expect([petId, stage, getPetDisplay({ petId, evolutionStage: stage }).emoji])
+                    .not.toEqual([petId, stage, '🐾']);
+            }
+        }
+    });
+});
+
+describe('pet sprite palettes', () => {
+    const { __test__: sprites } = require('../src/utils/cardGenerator');
+
+    test('cover every species, so none renders as a grey paw print', () => {
+        for (const petId of Object.keys(PET_DEFINITIONS)) {
+            expect([petId, Boolean(sprites.PET_SPRITE_COLORS[petId])]).toEqual([petId, true]);
+            expect([petId, Boolean(sprites.PET_SPRITE_EMOJIS[petId])]).toEqual([petId, true]);
+            for (const stage of [2, 3]) {
+                expect([petId, stage, sprites.EVOLVED_PET_EMOJIS[petId]?.[stage]])
+                    .toEqual([petId, stage, getPetDisplay({ petId, evolutionStage: stage }).emoji]);
+            }
+        }
     });
 });

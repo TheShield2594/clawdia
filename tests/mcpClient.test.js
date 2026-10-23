@@ -261,6 +261,36 @@ describe('SSRF guard', () => {
     });
 });
 
+describe('an operator\'s server on their own network', () => {
+    // `allow_private` on a config-file entry: a git or notes server on the LAN.
+    // The file is the operator's, so the two network guards are lifted for that
+    // connection alone — and only that connection.
+    const LAN = 'http://192.168.1.20:3000/mcp';
+
+    test('accepts a private, plain-http address', () => {
+        expect(() => new McpHttpClient({ url: LAN, privateNetwork: true })).not.toThrow();
+    });
+
+    test('still refuses what is not an http(s) URL, or embeds a credential', () => {
+        expect(() => new McpHttpClient({ url: 'file:///etc/passwd', privateNetwork: true })).toThrow(/http/);
+        expect(() => new McpHttpClient({ url: 'http://u:p@10.0.0.2/mcp', privateNetwork: true })).toThrow(/credentials/);
+    });
+
+    test('dials without the SSRF guard, and over http', async () => {
+        respondBy(HANDSHAKE);
+        await new McpHttpClient({ url: LAN, authorizationToken: 'secret', privateNetwork: true }).initialize();
+
+        const [call] = postsTo('initialize');
+        expect(call[0]).toBe(LAN);
+        expect(call[2].dispatcher).toBeUndefined();
+    });
+
+    test('anything not flagged keeps both guards', async () => {
+        expect(() => new McpHttpClient({ url: LAN })).toThrow(/private or reserved/);
+        expect(() => new McpHttpClient({ url: LAN, privateNetwork: 'yes' })).toThrow(/private or reserved/);
+    });
+});
+
 describe('server-sent event responses', () => {
     test('reads the answer out of an SSE stream', async () => {
         http.post.mockImplementation(async (_url, payload) => {

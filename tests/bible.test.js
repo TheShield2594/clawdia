@@ -55,6 +55,7 @@ const { startDailyBibleService, rescheduleBibleVerse } = require('../src/service
 function makeChannel(hasPerm = true) {
     const perms = { has: jest.fn().mockReturnValue(hasPerm) };
     return {
+        guildId: 'g1',
         guild: {
             members: {
                 me: { id: 'bot1' },

@@ -21,6 +21,7 @@ const { serverShopGrantPayoutKey, serverShopRefundPayoutKey } = require('../../u
 const { shopRefundMessage } = require('../../utils/grindShop');
 const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
 const { hasUnlock } = require('../../utils/prestige');
+const { sensitivePermissionsOf, grantableRole } = require('../../utils/sensitiveRolePermissions');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 // The grind shops expose their browse pages so /shop can host them as sections
@@ -591,6 +592,17 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                         embeds: [], components: []
                     });
                 }
+                // A role carrying admin or moderator permissions is never sold
+                // (#1141): the grant below would refuse it, so refuse the sale
+                // before any coins move rather than after.
+                const itemRole = freshItem.roleId ? interaction.guild.roles.cache.get(freshItem.roleId) : null;
+                if (itemRole && sensitivePermissionsOf(itemRole.permissions).length) {
+                    grantableRole(interaction.guild, freshItem.roleId, 'shop', interaction.user.id); // logs the refusal
+                    return reply({
+                        content: `**${freshItem.name}** grants a role with moderator or admin permissions, so it can't be bought. Nothing was charged — let an admin know.`,
+                        embeds: [], components: []
+                    });
+                }
                 const freshPrice = effectivePrice(freshItem, !!freshGuild.dynamicPricing?.enabled);
                 const freshTotal = freshPrice * quantity;
 
@@ -757,8 +769,11 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                 // so a failed add is recoverable — but the receipt must not say
                 // "Role Granted" over a role that was not (#873, pass 14).
                 let roleGranted = false;
-                if (freshItem.roleId) {
-                    roleGranted = await interaction.member.roles.add(freshItem.roleId)
+                const grantRole = freshItem.roleId
+                    ? grantableRole(interaction.guild, freshItem.roleId, 'shop', interaction.user.id)
+                    : null;
+                if (grantRole) {
+                    roleGranted = await interaction.member.roles.add(grantRole.id)
                         .then(() => true)
                         .catch(err => { console.error('[shop] role grant failed:', err); return false; });
                 }
