@@ -311,9 +311,9 @@ function buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target) 
 // ─── The material cards ───────────────────────────────────────────────────────
 
 // The Hunt, Fish, Mine and Explore tabs: one section per rarity tier, rarest
-// first, each material a tile with its count. Art is keyed `<source>:<key>`;
-// materials without baked art yet (#1168) draw as a medallion in their tier's
-// colour, the same stand-in the activity inventories use.
+// first, each material a tile with its count. Art is keyed `<source>:<key>`
+// and every material has baked art (#1168); one added without art draws as a
+// medallion in its tier's colour, the same stand-in the activity inventories use.
 
 const MATERIAL_CARD_TILES = 16;
 const SOURCE_TITLES = { hunt: 'Hunting Materials', fish: 'Fishing Materials', mine: 'Mining Materials', explore: 'Exploration Finds' };
