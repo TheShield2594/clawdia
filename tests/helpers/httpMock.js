@@ -1,5 +1,7 @@
 'use strict';
 
+const { spyOnFetch } = require('./fetchSpy');
+
 /**
  * One `fetch` mock, split back into per-method handlers (#932).
  *
@@ -16,7 +18,7 @@
  */
 
 /**
- * Installs the mock on `globalThis.fetch`.
+ * Installs the mock on both `fetch`es (see fetchSpy.js).
  *
  * Call it from a `beforeEach`: the suites that use this also restore mocks
  * between tests, and a spy installed once at module load would not survive.
@@ -29,7 +31,7 @@ function installHttpMock() {
     const del = jest.fn();
     const byMethod = { GET: get, POST: post, DELETE: del };
 
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation((url, init = {}) => {
+    const fetchMock = spyOnFetch().mockImplementation((url, init = {}) => {
         const method = String(init.method || 'GET').toUpperCase();
         const handler = byMethod[method];
         // Not a silent undefined: a request this suite never described is a bug

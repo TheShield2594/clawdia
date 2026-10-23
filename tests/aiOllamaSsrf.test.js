@@ -17,6 +17,7 @@ const {
     guardedLookup, guardedDispatcher, assertPublicHttpUrl, assertHttpsUrl,
 } = require('../src/utils/outboundGuard');
 const { jsonResponse, textResponse, payloadOf } = require('./helpers/fetchResponse');
+const { spyOnFetch } = require('./helpers/fetchSpy');
 const ollama = require('../src/services/ai/providers/ollama');
 const { validateAiUpdate } = require('../src/dashboard/routes/api/settings');
 
@@ -172,7 +173,7 @@ describe('ollama endpoint policy', () => {
 describe('the provider actually uses the policy', () => {
     let mockFetch;
     beforeEach(() => {
-        mockFetch = jest.spyOn(globalThis, 'fetch')
+        mockFetch = spyOnFetch()
             .mockImplementation(async () => jsonResponse({ message: { content: 'hi' } }));
     });
     afterEach(() => mockFetch.mockRestore());

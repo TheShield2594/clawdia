@@ -40,6 +40,21 @@
 const { Readable } = require('stream');
 
 /**
+ * The `fetch` that can drive `init.dispatcher`.
+ *
+ * A dispatcher is an undici `Agent` from the `undici` in package.json, and it
+ * only speaks the request-handler protocol of its own major. The platform
+ * `fetch` is the undici bundled inside Node, so pairing the two ties the
+ * dependency to whatever Node ships, and a mismatch fails every guarded
+ * request with `invalid onRequestStart method`. A request that brings its own
+ * dispatcher goes through that same package's `fetch`, so the pair always
+ * agrees; everything else stays on the platform one.
+ */
+function fetchFor(init) {
+    return init.dispatcher ? require('undici').fetch : fetch;
+}
+
+/**
  * `fetch`, with the reason a request failed left where a caller will read it.
  *
  * `TypeError: fetch failed` is what every connection failure looks like from
@@ -62,7 +77,7 @@ async function request(url, init = {}) {
     const signal = init.signal
         ?? (Number.isFinite(init.timeout) ? AbortSignal.timeout(init.timeout) : undefined);
     try {
-        return await fetch(url, { ...init, signal });
+        return await fetchFor(init)(url, { ...init, signal });
     } catch (err) {
         const cause = err?.cause;
         if (!cause?.message) throw err;
