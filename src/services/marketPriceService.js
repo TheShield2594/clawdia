@@ -45,7 +45,7 @@ let firstNUnsupported = false;
  * Each item's last sale and its RECENT_SALES most recent prices.
  *
  * `$firstN` (MongoDB 5.2+) keeps at most RECENT_SALES prices per item while
- * grouping. The deployment runs mongo:7, but a self-hosted server can be older
+ * grouping. The deployment runs mongo:8.0, but a self-hosted server can be older
  * and would reject the operator; that one case falls back to `$push` + `$slice`,
  * which gathers the item's whole 90-day history before trimming it — correct,
  * just heavier — rather than losing every price hint.

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * #644. `node:24-alpine` and `mongo:7` are floating tags: Docker Hub
+ * #644. `node:24-alpine` and `mongo:8.0` are floating tags: Docker Hub
  * re-publishes them on every patch of the line, so the same commit built on two
  * days produces two different runtimes — and a rebuild meant to roll a
  * regression back can quietly ship a *newer* base than the image it replaces.

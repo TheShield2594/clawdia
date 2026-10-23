@@ -39,10 +39,10 @@
 services:
   mongodb:
     # Digest-pinned so the same stack file always deploys the same mongod (#644);
-    # `mongo:7` alone is re-published on every 7.x patch. Bumped by Dependabot,
+    # `mongo:8.0` alone is re-published on every 8.0.x patch. Bumped by Dependabot,
     # held by tests/imagePinning.test.js. The tag stays for readability — Docker
     # resolves the digest.
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:8.0@sha256:4a4ab5d4834207389e0d7270fac988e21ffedccecba77991a552f755df229907
     container_name: clawdia-mongodb
     restart: unless-stopped
     # Authentication (#648). The internal-only network keeps the outside world
@@ -210,7 +210,7 @@ services:
   # stays red and nothing that depends on it starts — the reason is in this
   # container's log rather than buried in a restart loop.
   mongo-replset-init:
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:8.0@sha256:4a4ab5d4834207389e0d7270fac988e21ffedccecba77991a552f755df229907
     container_name: clawdia-mongo-replset-init
     restart: "no"
     depends_on:
@@ -520,7 +520,7 @@ services:
   #     sh -c 'cp /b/clawdia-<timestamp>.gz /out/'
   # To restore one, see scripts/restore.sh and scripts/verify-backup.sh.
   backup:
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:8.0@sha256:4a4ab5d4834207389e0d7270fac988e21ffedccecba77991a552f755df229907
     container_name: clawdia-backup
     restart: unless-stopped
     environment:

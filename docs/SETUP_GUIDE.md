@@ -1037,12 +1037,30 @@ knowing about before an upgrade rather than during one:
   adds or renames a command needs no separate step. Newly registered global
   commands can take up to an hour to appear.
 
-`mongo:7` and the `node:24-alpine` base are pinned by `@sha256:` digest rather
+`mongo:8.0` and the `node:24-alpine` base are pinned by `@sha256:` digest rather
 than by tag, so `docker-compose pull` fetches the exact images the release was
 tested against and a rebuild for a rollback cannot quietly pick up a newer base.
 Dependabot raises the bumps for the Dockerfile and `docker-compose.yml`. It does
 not read `portainer-stack.yml`, so a compose bump fails CI until the same digest
 is copied into the stack file; that copy is the one step done by hand.
+
+**MongoDB major versions are taken one at a time.** mongod only starts on data
+whose feature compatibility version (FCV) is its own major or the one before, so
+the pin is `8.0`, not `8`: the floating `8` tag follows the newest 8.x release,
+which cannot open a 7.0 data directory. Moving from 7 to 8.0 needs nothing but
+the new image (8.0 runs a 7.0-FCV data set as is). Once the bot has run cleanly
+on it for a while, raise the FCV, which is what a later upgrade will need:
+
+```bash
+docker exec -it clawdia-mongodb mongosh --eval \
+  'db.adminCommand({ setFeatureCompatibilityVersion: "8.0", confirm: true })'
+```
+
+Add the usual `-u`/`-p`/`--authenticationDatabase admin` if authentication is
+on. Raising the FCV is the one-way step: with it at 7.0 you can still go back to
+the `mongo:7` image, and once it is 8.0 you cannot. A Dependabot PR that moves
+the tag past `8.0`, or across a major, needs the same care, so read it before
+merging.
 
 ### Viewing Logs
 
