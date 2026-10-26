@@ -99,4 +99,29 @@ describe('Anthropic temperature', () => {
 
         expect(mockAnthropicCreate.mock.calls[0][0].temperature).toBe(0.4);
     });
+
+    test.each(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-4-8', 'claude-fable-5-1'])(
+        '%s gets no temperature at all, since it 400s on one',
+        async model => {
+            await anthropicProvider.complete({ ...baseReq, model, temperature: 0.7 });
+
+            expect(mockAnthropicCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
+        }
+    );
+});
+
+describe('Anthropic isLegacyModel', () => {
+    test.each([
+        'claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-1-20250805',
+        'claude-sonnet-4-20250514', 'claude-3-5-haiku-latest', 'anthropic.claude-sonnet-4-5-20250929-v1:0'
+    ])('%s is legacy', model => {
+        expect(anthropicProvider.isLegacyModel(model)).toBe(true);
+    });
+
+    test.each([
+        'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5',
+        'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', ''
+    ])('%s is not', model => {
+        expect(anthropicProvider.isLegacyModel(model)).toBe(false);
+    });
 });

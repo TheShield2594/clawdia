@@ -58,3 +58,20 @@ describe('Gemini cached input pricing (#1049)', () => {
         expect(cost).toBeCloseTo(costAtFullInputRate(0.075, 0.30, 1000, 100), 12);
     });
 });
+
+describe('Claude 5 pricing', () => {
+    // Opus 5.5 and Sonnet 5.5 read cache at 0.05x input, the rest of the line at
+    // 0.1x — so the 5.5 rows must win over the broader family rows below them.
+    test.each([
+        ['claude-opus-5-5',   4.00, 20.00, 0.20],
+        ['claude-opus-5',     5.00, 25.00, 0.50],
+        ['claude-opus-4-8',   5.00, 25.00, 0.50],
+        ['claude-sonnet-5-5', 2.00, 10.00, 0.10],
+        ['claude-sonnet-5',   2.00, 10.00, 0.20],
+        ['claude-haiku-5-5',  0.10, 0.50,  0.01]
+    ])('%s bills at its own rates', (model, inRate, outRate, cachedRate) => {
+        const cost = estimateCost('anthropic', model, 1000, 100, 400);
+        const expected = (600 * inRate + 400 * cachedRate + 100 * outRate) / 1_000_000;
+        expect(cost).toBeCloseTo(expected, 12);
+    });
+});
