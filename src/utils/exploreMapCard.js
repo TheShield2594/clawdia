@@ -725,5 +725,11 @@ module.exports = {
     FILE_EXT,
     LAYOUT,
     WORLD_ART,
+    // The drawing primitives and brand palette, for the other map cards (the
+    // /mine map) so they share one sticker, one pin and one palette.
+    primitives: {
+        plain, roundRect, fitText, sticker, disc, rng, playerMarker,
+        FONT, INK, CREAM, CREAM_SHADE, ORANGE, WARM, GOLD,
+    },
     __test__: { plain, placeRegions, hashSeed },
 };

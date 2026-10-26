@@ -1,0 +1,43 @@
+{
+  "_comment": "The per-depth rock faces under /mine map (assets/mine-map/STYLE.md). For each depth: the job id, CDN url and prompt that produced it. Every one shares the settings and the style reference below. src/assets/mine-map/<depth>.jpg is each image downscaled to 1200x800 (JPEG, quality 0.9).",
+  "model": "gpt_image_2_5",
+  "settings": {
+    "quality": "high",
+    "resolution": "2k",
+    "aspect_ratio": "3:2",
+    "background": "opaque"
+  },
+  "styleReference": "6986ef5f-26f4-4873-a834-83e9bd7d0eb8 (the /explore map's world art, so the two maps are one family)",
+  "items": {
+    "surface_quarry": {
+      "jobId": "566f328a-c249-4f22-9afb-7dd092f4485d",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261026_123339_566f328a-c249-4f22-9afb-7dd092f4485d.png",
+      "file": "surface_quarry.jpg",
+      "prompt": "Game background art: a front-on cutaway view of a sunlit open-pit rock quarry wall, seen straight on. The whole frame is one solid, unbroken face of grey stone with tan and cream strata bands running across it, evenly textured with cracks and pebbles so any part of it could be dug into. No holes, tunnels, caves or openings anywhere in the rock. Only at the very edges: a thin strip of green grass and blue sky along the top edge, wooden scaffold beams standing against the left and right edges, and a few grey boulders along the bottom edge. Take only the art style from the reference image, not its subject. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent. No text, no letters, no labels, no numbers, no icons, no people, no border, no frame."
+    },
+    "coal_tunnels": {
+      "jobId": "cacfc3a3-21d1-47f3-9b39-9b97e31d58c2",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261026_123340_cacfc3a3-21d1-47f3-9b39-9b97e31d58c2.png",
+      "file": "coal_tunnels.jpg",
+      "prompt": "Game background art: a front-on cutaway view of an underground mine wall in dark sooty coal tunnels, seen straight on. The whole frame is one solid, unbroken face of dark charcoal-grey rock streaked with glossy black coal seams, evenly textured so any part of it could be dug into. No holes, tunnels, caves or openings anywhere in the rock. Only at the very edges: heavy timber support beams standing against the left and right edges, a crossbeam along the top edge with a hanging lantern giving a warm glow, and a rusty mine-cart rail along the bottom edge. Take only the art style from the reference image, not its subject. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent. No text, no letters, no labels, no numbers, no icons, no people, no border, no frame."
+    },
+    "iron_mines": {
+      "jobId": "a57f409b-946a-4334-81df-e208134b49f1",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261026_123439_a57f409b-946a-4334-81df-e208134b49f1.png",
+      "file": "iron_mines.jpg",
+      "prompt": "Game background art: a front-on cutaway view of a deep underground iron mine wall, seen straight on. The whole frame is one solid, unbroken face of brown-grey rock threaded with rusty-red iron ore veins, evenly textured so any part of it could be dug into. No holes, tunnels, caves or openings anywhere in the rock. Only at the very edges: riveted iron and timber supports standing against the left and right edges, a beam along the top edge with a hanging lantern, and a mine-cart rail along the bottom edge. Take only the art style from the reference image, not its subject. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent. No text, no letters, no labels, no numbers, no icons, no people, no border, no frame."
+    },
+    "crystal_caves": {
+      "jobId": "0d5341b8-22df-408d-974d-52ee9b02ccf2",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261026_123340_0d5341b8-22df-408d-974d-52ee9b02ccf2.png",
+      "file": "crystal_caves.jpg",
+      "prompt": "Game background art: a front-on cutaway view of a glittering cavern wall, seen straight on. The whole frame is one solid, unbroken face of deep slate-blue rock studded with small glowing blue crystals growing from it, evenly textured so any part of it could be dug into. No holes, tunnels, caves or openings anywhere in the rock. Only at the very edges: clusters of larger glowing blue crystals along the left and right edges, crystal stalactites hanging along the top edge, and crystal shards along the bottom edge. Take only the art style from the reference image, not its subject. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent. No text, no letters, no labels, no numbers, no icons, no people, no border, no frame."
+    },
+    "the_abyss": {
+      "jobId": "824a6a67-8f59-46db-b913-a60db09200b3",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261026_123439_824a6a67-8f59-46db-b913-a60db09200b3.png",
+      "file": "the_abyss.jpg",
+      "prompt": "Game background art: a front-on cutaway view of the wall of a bottomless dark mining fissure, seen straight on. The whole frame is one solid, unbroken face of near-black violet rock threaded with thin glowing golden treasure veins, evenly textured so any part of it could be dug into. No holes, tunnels, caves or openings anywhere in the rock. Only at the very edges: jagged dark rock pillars along the left and right edges, and a warm golden glow rising from far below along the bottom edge. Take only the art style from the reference image, not its subject. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent. No text, no letters, no labels, no numbers, no icons, no people, no border, no frame."
+    }
+  }
+}

@@ -194,3 +194,51 @@ describe('the mine lock', () => {
         expect(text).not.toContain('spare in your bag');
     });
 });
+
+describe('the drawn map', () => {
+    test('the map is attached as a picture, and the emoji grid and legend step aside for it', async () => {
+        const mineMap = Array(100).fill(0);
+        mineMap[44] = 1;
+        mineMap[45] = 2;
+        mineMap[46] = 3;
+        seedUser({ mineMap });
+        const interaction = makeInteraction();
+        await handleMap(interaction);
+
+        const payload = interaction.reply.mock.calls[0][0];
+        expect(payload.files).toHaveLength(1);
+        expect(payload.files[0].name).toBe('mine-map.jpg');
+        expect(payload.files[0].description).toContain('3 of 100 cells dug, 1 ore vein, 1 cave-in');
+        expect(payload.embeds[0].data.image.url).toBe('attachment://mine-map.jpg');
+
+        const text = repliedText(interaction);
+        expect(text).toContain('3/100 cells explored');
+        expect(text).toContain('1 ore vein · 💥 1 cave-in');
+        expect(text).not.toContain('```');
+        expect(text).not.toContain('Legend');
+    });
+
+    test('when the picture will not render, the emoji grid and legend come back', async () => {
+        let handler;
+        jest.isolateModules(() => {
+            jest.doMock('../src/utils/mineMapCard', () => ({
+                ...jest.requireActual('../src/utils/mineMapCard'),
+                createMineMapCard: jest.fn(async () => { throw new Error('canvas exploded'); }),
+            }));
+            ({ handleMap: handler } = require('../src/commands/economy/mine/map'));
+        });
+        const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        seedUser();
+        const interaction = makeInteraction();
+        await handler(interaction);
+
+        const payload = interaction.reply.mock.calls[0][0];
+        expect(payload.files).toBeUndefined();
+        const text = repliedText(interaction);
+        expect(text).toContain('```');
+        expect(text).toContain('Legend');
+        expect(spy).toHaveBeenCalledWith('[mine] map card render failed:', expect.any(Error));
+        spy.mockRestore();
+        jest.dontMock('../src/utils/mineMapCard');
+    });
+});
