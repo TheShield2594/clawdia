@@ -36,6 +36,7 @@ const { isPrimaryShard, shardTag } = require('./utils/sharding');
 const { loadCommandModules } = require('./utils/commandLoader');
 const { startCooldownSweeper } = require('./utils/commandCooldowns');
 const { runShutdown } = require('./utils/shutdown');
+const { discordRestAgent } = require('./utils/discordRestAgent');
 
 const client = new Client({
     intents: [
@@ -61,6 +62,10 @@ const client = new Client({
     // asks for more itself (ticket support roles, the slots jackpot @here, RSS
     // role pings), so a new echo path fails safe (#1142).
     allowedMentions: { parse: ['users'], repliedUser: false },
+
+    // REST's own dispatcher, so uploads never go through another undici's
+    // global Agent; see discordRestAgent.js.
+    rest: { agent: discordRestAgent() },
 });
 
 client.commands = new Collection();
