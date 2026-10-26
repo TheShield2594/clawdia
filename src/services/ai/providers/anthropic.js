@@ -36,6 +36,7 @@ const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALL
 // the cost ceiling already prefers.
 const PRICING = [
     { match: /opus-5-5/i,   in: 4.00,  out: 20.00, cachedIn: 0.20 },
+    { match: /sonnet-5-5/i, in: 2.00,  out: 10.00, cachedIn: 0.10 },
     { match: /sonnet-5/i,   in: 2.00,  out: 10.00, cachedIn: 0.20 },
     { match: /haiku-5/i,    in: 0.10,  out: 0.50,  cachedIn: 0.01 },
     { match: /opus-5/i,     in: 5.00,  out: 25.00, cachedIn: 0.50 },
