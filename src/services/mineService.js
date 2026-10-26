@@ -12,7 +12,9 @@ const {
     ROCK_STABILITY,
     ROCK_READ,
     PRESTIGE_BONUSES,
-    MINE_QUEST_TEMPLATES
+    MINE_QUEST_TEMPLATES,
+    MAP_SIZE,
+    MAP_CELL: CELL,
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
@@ -76,7 +78,6 @@ function ensureMineData(user) {
     }
 
     // Mine map: 10×10 flat array; initialise once then persist
-    const MAP_SIZE = 10;
     if (!Array.isArray(m.mineMap) || m.mineMap.length !== MAP_SIZE * MAP_SIZE) {
         m.mineMap = new Array(MAP_SIZE * MAP_SIZE).fill(0);
     }
@@ -1125,9 +1126,7 @@ function durabilityBar(current, max, length = 10) {
 
 // ─── MINE MAP ─────────────────────────────────────────────────────────────────
 
-const MAP_SIZE = 10;
-// Cell codes
-const CELL = { ROCK: 0, DUG: 1, ORE: 2, CAVE_IN: 3 };
+// The grid size and cell codes (MAP_SIZE, MAP_CELL) come from data/mineData.
 
 function updateMineMap(user, result) {
     const m = user.mining;

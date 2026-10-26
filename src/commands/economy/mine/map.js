@@ -3,11 +3,33 @@
 // /mine map — the depths, and which of them the player has opened.
 
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
-const { MessageFlags, EmbedBuilder } = require('discord.js');
+const { MessageFlags, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, renderMineMap, getRaidableMaterials, RAID_MAX_PER_MATERIAL } = require('../../../services/mineService');
 const { DEPTHS, INTENSITY_LEVELS, MATERIAL_NAMES } = require('../../../data/mineData');
+const { createMineMapCard, mineMapAltText, siteCounts, plural, FILE_EXT } = require('../../../utils/mineMapCard');
+
+const MAP_FILE = `mine-map.${FILE_EXT}`;
+
+/**
+ * The drawn mine map as an attachment, or null when it will not render — the
+ * reply then falls back to the emoji grid, so a failed draw costs the picture
+ * only.
+ */
+async function renderMapCard(m, depth, username) {
+    const opts = {
+        cells: m.mineMap, row: m.mineMapRow, col: m.mineMapCol,
+        depthId: m.activeDepth, depthName: depth?.name, username,
+    };
+    try {
+        const buffer = await createMineMapCard(opts);
+        return new AttachmentBuilder(buffer, { name: MAP_FILE, description: mineMapAltText(opts).slice(0, 1024) });
+    } catch (err) {
+        console.error('[mine] map card render failed:', err);
+        return null;
+    }
+}
 
 // ─── MAP ──────────────────────────────────────────────────────────────────────
 
@@ -33,11 +55,8 @@ async function handleMap(interaction) {
     ensureMineData(user);
     const m = user.mining;
 
-    const grid     = renderMineMap(user);
-    const depth    = DEPTHS[m.activeDepth];
-    const mapSize  = 10;
-    const explored = (m.mineMap ?? []).filter(c => c !== 0).length;
-    const total    = mapSize * mapSize;
+    const depth  = DEPTHS[m.activeDepth];
+    const counts = siteCounts(m.mineMap);
 
     // Yield multiplier comes from the intensity the miner picks before digging, with
     // a good or rich seam lifting it a rung or two at the same risk. Read off the
@@ -48,15 +67,20 @@ async function handleMap(interaction) {
 
     const raidableLines = getRaidableMaterials(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 
+    // The picture carries the grid; the emoji grid and its legend are only the
+    // fallback when it will not render. Every number on the picture is here too.
+    const card = await renderMapCard(m, depth, interaction.user.username);
+    const grid = card ? '' : `\`\`\`\n${renderMineMap(user)}\n\`\`\`\n`;
+
     const embed = new EmbedBuilder()
         .setColor('#8B4513')
         .setTitle(`🗺️ ${interaction.user.username}'s Mine Map`)
-        .setDescription(`\`\`\`\n${grid}\n\`\`\`\n` +
+        .setDescription(grid +
             `${depth ? `**Depth:** ${depth.emoji} ${depth.name}` : ''} | **Yield range:** ${intensityHint}`)
         .addFields(
             {
                 name: '📊 Excavation Progress',
-                value: `${explored}/${total} cells explored`,
+                value: `${counts.explored}/${counts.total} cells explored\n💎 ${plural(counts.ore, 'ore vein')} · 💥 ${plural(counts.caveIn, 'cave-in')}`,
                 inline: true
             },
             {
@@ -66,11 +90,6 @@ async function handleMap(interaction) {
                     : 'Nothing exposed — raiders can only reach materials you hold 2+ of.',
                 inline: true
             },
-            {
-                name: '🔑 Legend',
-                value: '🪨 Unexplored  ⬛ Excavated  💎 Ore Vein  💥 Cave-in  ⛏️ You',
-                inline: false
-            }
         )
         .setFooter({ text: 'Mine more to expand your map • Use /mine raid to steal from others' })
         .setTimestamp();
@@ -82,7 +101,12 @@ async function handleMap(interaction) {
         embed.addFields({ name: '🔓 Mine Lock', value: `${spareLocks} in your bag, none armed — use \`/mine shop use item:mine_lock\`.`, inline: true });
     }
 
-    return interaction.reply({ embeds: [embed] });
+    if (!card) {
+        embed.addFields({ name: '🔑 Legend', value: '🪨 Unexplored  ⬛ Excavated  💎 Ore Vein  💥 Cave-in  ⛏️ You', inline: false });
+        return interaction.reply({ embeds: [embed] });
+    }
+    embed.setImage(`attachment://${MAP_FILE}`);
+    return interaction.reply({ embeds: [embed], files: [card] });
 }
 
 module.exports = {

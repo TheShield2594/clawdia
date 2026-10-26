@@ -815,7 +815,8 @@ module.exports = {
     CRAFT_RECIPES,
     MINE_QUEST_TEMPLATES,
 
-    // Map cell visual constants (exported for use in mine/map.js)
+    // The dig site's grid size and cell codes: written by services/mineService,
+    // drawn by utils/mineMapCard.
     MAP_CELL: {
         ROCK:    0,  // unexplored: 🪨
         DUG:     1,  // excavated:  ⬛

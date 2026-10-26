@@ -799,6 +799,11 @@ the payout set against your best dig and the server record, the coins and XP,
 and a banner for a cave-in you blasted or dug your way out of. A failed swing
 or a haul left in a collapse stays text-only.
 
+`/mine map` draws your dig site over a painting of the depth you are working:
+the 10×10 grid with every cell you have dug carved out as tunnel, ore veins as
+glowing gems, cave-ins as rubble and a pin where you stand, with the counts
+alongside. If the picture cannot be drawn it falls back to the emoji grid.
+
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
 depths, materials, consumables and lifetime stats:
