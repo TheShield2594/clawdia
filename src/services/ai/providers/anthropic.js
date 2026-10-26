@@ -35,6 +35,11 @@ const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALL
 // are priced at `in`, a slight undercharge in the safe (refuse-late) direction
 // the cost ceiling already prefers.
 const PRICING = [
+    { match: /opus-5-5/i,   in: 4.00,  out: 20.00, cachedIn: 0.20 },
+    { match: /sonnet-5/i,   in: 2.00,  out: 10.00, cachedIn: 0.20 },
+    { match: /haiku-5/i,    in: 0.10,  out: 0.50,  cachedIn: 0.01 },
+    { match: /opus-5/i,     in: 5.00,  out: 25.00, cachedIn: 0.50 },
+    { match: /opus-4-[5-9]/i, in: 5.00, out: 25.00, cachedIn: 0.50 },
     { match: /haiku-4/i,    in: 1.00,  out: 5.00,  cachedIn: 0.10 },
     { match: /sonnet-4/i,   in: 3.00,  out: 15.00, cachedIn: 0.30 },
     { match: /opus-4/i,     in: 15.00, out: 75.00, cachedIn: 1.50 },
@@ -51,19 +56,40 @@ const PRICING = [
 // one Discord message generating forever.
 const MAX_PAUSE_TURN_CONTINUATIONS = 3;
 
+/**
+ * Whether this model still takes sampling parameters and a forced tool choice.
+ *
+ * Claude 3 through 4.6 do. From Opus 4.7 on, a non-default `temperature` is an
+ * HTTP 400, and the Claude 5 line (Opus 5.5, Sonnet 5.5, ...) rejects
+ * `temperature` outright and forced `tool_choice` as well — so a guild that
+ * picked one of them got a 400 on every message, because the guild's 0.7
+ * default always went out. An allow list, unlike `supportsVision`: an unknown
+ * model is a newer one, and the newer ones are the ones that refuse these.
+ */
+function isLegacyModel(model) {
+    const name = String(model || '').toLowerCase();
+    if (/claude-(2|instant|3)/.test(name)) return true;
+    // `claude-sonnet-4-20250514` is 4.0: the date is not a minor version.
+    const match = name.match(/(?:opus|sonnet|haiku)-4(?:-(\d{1,2}))?(?!\d)/);
+    return Boolean(match) && Number(match[1] || 0) <= 6;
+}
+
 // The guild setting allows 0–2 (OpenAI's range), but Anthropic rejects
 // anything above 1: a temperature tuned for another provider must not turn
-// into an HTTP 400 on every message after switching to Claude.
-function clampTemperature(temperature) {
+// into an HTTP 400 on every message after switching to Claude. Newer models
+// take no temperature at all, so for them it is left off the request.
+function clampTemperature(temperature, model) {
+    if (!isLegacyModel(model)) return undefined;
     if (typeof temperature !== 'number' || Number.isNaN(temperature)) return undefined;
     return Math.min(Math.max(temperature, 0), 1);
 }
 
 function baseRequest({ model, systemPrompt, temperature, maxTokens }) {
+    const clamped = clampTemperature(temperature, model);
     return {
         model,
         max_tokens: maxTokens,
-        temperature: clampTemperature(temperature),
+        ...(clamped === undefined ? {} : { temperature: clamped }),
         system: [
             { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
         ]
@@ -491,19 +517,36 @@ async function complete(req) {
 async function structured({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, schema, schemaName }) {
     const client = new Anthropic({ apiKey });
     const name = schemaName || 'result';
+    const legacy = isLegacyModel(model);
 
+    // Newer models reject a forced tool choice with a 400, but they all take a
+    // native JSON schema on `output_config.format`, which answers in one text
+    // block that is the object.
     const response = await client.messages.create({
         ...baseRequest({ model, systemPrompt, temperature, maxTokens }),
         messages: buildMessages(history, prompt, null, model),
-        tools: [{ name, description: 'Record the result as structured data.', input_schema: schema }],
-        tool_choice: { type: 'tool', name }
+        ...(legacy
+            ? {
+                tools: [{ name, description: 'Record the result as structured data.', input_schema: schema }],
+                tool_choice: { type: 'tool', name }
+            }
+            : { output_config: { format: { type: 'json_schema', schema } } })
     });
 
-    const use = (response.content || []).find(block => block.type === 'tool_use' && block.name === name);
-    if (!use) throw new Error('the model did not return the structured result');
+    let data;
+    if (legacy) {
+        data = (response.content || []).find(block => block.type === 'tool_use' && block.name === name)?.input;
+    } else {
+        try {
+            data = JSON.parse(textOf(response.content));
+        } catch {
+            data = undefined;
+        }
+    }
+    if (data === undefined) throw new Error('the model did not return the structured result');
 
     return {
-        data: use.input,
+        data,
         usage: response.usage
             ? {
                 inputTokens: inputOf(response.usage),
@@ -531,6 +574,7 @@ module.exports = {
     // Which models can answer under a JSON schema natively — here, via a forced
     // tool call (#1044).
     supportsStructured,
+    isLegacyModel,
     resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'anthropicKey', envKey: process.env.ANTHROPIC_API_KEY, guildId }),
     stream,
     complete,

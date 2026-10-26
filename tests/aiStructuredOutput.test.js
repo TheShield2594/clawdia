@@ -177,4 +177,29 @@ describe('anthropic.structured', () => {
 
         await expect(anthropic.structured({ ...REQ, model: 'claude-haiku-4-5' })).rejects.toThrow(/did not return/);
     });
+
+    test('a newer model gets output_config.format instead of a forced tool, which it would 400 on', async () => {
+        mockAnthropicCreate.mockResolvedValue({
+            content: [{ type: 'text', text: '{"name":"Emberfall","mechanic":"fishing","target":7}' }],
+            usage: { input_tokens: 15, output_tokens: 5 }
+        });
+
+        const { data } = await anthropic.structured({ ...REQ, model: 'claude-opus-5-5' });
+
+        const body = mockAnthropicCreate.mock.calls[0][0];
+        expect(body).not.toHaveProperty('tool_choice');
+        expect(body).not.toHaveProperty('tools');
+        expect(body).not.toHaveProperty('temperature');
+        expect(body.output_config).toEqual({ format: { type: 'json_schema', schema: SCHEMA } });
+        expect(data).toEqual({ name: 'Emberfall', mechanic: 'fishing', target: 7 });
+    });
+
+    test('a newer model answering with something other than JSON throws', async () => {
+        mockAnthropicCreate.mockResolvedValue({
+            content: [{ type: 'text', text: 'hmm' }],
+            usage: { input_tokens: 1, output_tokens: 1 }
+        });
+
+        await expect(anthropic.structured({ ...REQ, model: 'claude-opus-5-5' })).rejects.toThrow(/did not return/);
+    });
 });
