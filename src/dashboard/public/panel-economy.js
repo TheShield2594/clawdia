@@ -618,6 +618,36 @@ document.addEventListener('click', function(e) {
     if (e.target.id === 'job-modal') closeJobModal();
 });
 
+// ── Chat events: excluded-channel tag input ─────────────────────────
+// The same chip list the leveling panel's No-XP channels use.
+function addChatEventExcludedChannel() {
+    const sel = document.getElementById('economy-chat-event-excluded-select');
+    const channelId = sel.value;
+    const channelName = sel.options[sel.selectedIndex]?.text || channelId;
+    if (!channelId) { toast('Please select a channel', 'error'); return; }
+    if (document.querySelector(`#economy-chat-event-excluded-list [data-channel-id="${CSS.escape(channelId)}"]`)) {
+        toast('Channel already added', 'error'); return;
+    }
+    const list = document.getElementById('economy-chat-event-excluded-list');
+    const tag = document.createElement('span');
+    tag.className = 'role-tag';
+    tag.dataset.channelId = channelId;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + channelName);
+    btn.textContent = '×';
+    btn.onclick = () => tag.remove();
+    tag.textContent = channelName + ' ';
+    tag.appendChild(btn);
+    list.appendChild(tag);
+    sel.value = '';
+}
+function removeChatEventExcludedChannel(channelId) {
+    const el = document.querySelector(`#economy-chat-event-excluded-list [data-channel-id="${CSS.escape(channelId)}"]`);
+    if (el) el.remove();
+}
+
 registerPanelActions({
     click: {
         'clear-shop-item-image': () => clearShopItemImage(),
@@ -635,6 +665,8 @@ registerPanelActions({
         'eco-ledger':       () => loadLedger(1),
         'eco-ledger-prev':  () => loadLedger(Math.max(1, _ledgerPage - 1)),
         'eco-ledger-next':  () => loadLedger(_ledgerPage + 1),
+        'add-chat-event-excluded':    () => addChatEventExcludedChannel(),
+        'chat-event-excluded-remove': (el, d) => removeChatEventExcludedChannel(d.channelId),
     },
     change: {
         'shop-item-image': el => previewShopItemImage(el),

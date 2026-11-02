@@ -1117,7 +1117,20 @@ function exploreUnlockRefundPayoutKey(interactionId) {
     return `explore:unlock:${interactionId}:refund`;
 }
 
+/**
+ * The prize for one ambient chat event — a coin drop, a supply crate or a flash
+ * trivia win (src/services/chatEventService.js).
+ *
+ * Keyed by the event's own message, which names exactly one prize: only one
+ * member can win it, so the key needs no user in it — it lives on the winner's
+ * document, and a retried or replayed credit of the same prize is a no-op.
+ */
+function chatEventPayoutKey(kind, eventMessageId) {
+    return `chatevent:${kind}:${eventMessageId}`;
+}
+
 module.exports = {
+    chatEventPayoutKey,
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, supplyClosetPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
