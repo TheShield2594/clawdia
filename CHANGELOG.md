@@ -14,6 +14,114 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [6.0.0] - 2026-11-02
+
+Migrations through `029_bind_guild_ai_keys` (none added since 5.0.0).
+
+The AI becomes a personal assistant, the grind games get picture cards, and
+chat events are reworked. **Major**: per-channel AI personas are removed
+(#1242), so a server that used them needs an admin to act. Two changes below
+also ask operators to check their deployment. With no new migration, the 5.0.0
+image can still run against this database.
+
+**Upgrade notes**
+
+- **Per-channel AI personas are gone (#1242).** The Personas tab, its
+  `POST`/`DELETE /persona` routes, the `ai.channelPersonas` setting and the
+  per-channel override are removed. A channel that had a persona now uses the
+  server-wide system prompt, and only gets replies if it is the AI channel or
+  the AI is unrestricted. **Action needed** on a server that used personas:
+  fold the persona into the system prompt, or make that channel the AI
+  channel. Stored persona data is ignored, not deleted.
+- **The dashboard trusts only private-address proxies by default (#1218).**
+  In production, a client arriving from a public address is taken at its
+  socket address whatever `X-Forwarded-For` says. **Check** a deployment
+  behind a proxy on a public address (a CDN, another VM): set `TRUST_PROXY`
+  (`1`, or the proxy's addresses) or the per-IP limits and the secure cookie
+  will see the proxy instead of the client. `TRUST_PROXY=true` is refused.
+- **Sealed backups carry a tag, and restore checks it (#1218).**
+  `restore.sh` and `verify-backup.sh` refuse a sealed archive whose `.tag` is
+  missing or wrong. Archives sealed before this release have no tag; open one
+  with `BACKUP_ALLOW_UNTAGGED=true` on that one command.
+- **The stack files move MongoDB from 7 to 8.0 (#1263).** 8.0 opens 7.0 data
+  as it is, and the 5.0.0 image runs against it. Raising the feature
+  compatibility version to 8.0 afterwards is optional and is the point of no
+  return for going back to mongo:7; see docs/SETUP_GUIDE.md.
+
+**AI**
+
+- **Personal assistant (#1228).** Memory and learning, web search through the
+  operator's SearXNG (`SEARXNG_URL`), `read_webpage`, and a searchable
+  conversation history. Answers DMs from members with Manage Server on the
+  server named by `AI_DM_GUILD_ID`. Transcribes voice messages. Runs stdio MCP
+  servers from the operator's config file. Falls back to up to two backup
+  providers when the main one is down or refusing.
+- **Scheduled AI tasks (#1227)** take a cron schedule, can deliver their
+  result by DM to whoever set them up, and can run as deep tasks.
+- **Image generation (#1237, #1241).** A per-server switch (off by default)
+  lets the AI draw images. Each server picks the service (OpenAI, Gemini,
+  OpenRouter or Higgsfield) and model on the dashboard. `OPENAI_IMAGE_MODEL`
+  and `GEMINI_IMAGE_MODEL` set the defaults. Deep tasks can delegate to
+  sub-agents.
+- **Spoken replies (#1236).** The AI can answer with a voice clip
+  (`GEMINI_TTS_MODEL` picks the Gemini voice model). Transcription is now
+  recorded in the usage ledger.
+- **AI-layer audit (#1248).** Unattended MCP writes are gated. Images,
+  transcription, speech and embeddings are held to the operator's
+  environment-key ceilings. OAuth grants are bound to the URL they were
+  started for. OAuth and "managers only" MCP connections are offered only to
+  members with Manage Server, and their writes are approved by managers.
+- The AI settings are split into Chat, Abilities, Images, Voice, Usage and
+  Knowledge Base tabs (#1242). A turn's provider rounds stop once its
+  deadline passes or it is cancelled, and an optional Playwright MCP browser
+  sidecar ships in docker-compose.yml (#1243). An unreachable MCP server is no
+  longer named on unrelated replies (#1250).
+- **Newer Claude models work (#1265).** Opus 4.7 and later and the Claude 5
+  models returned HTTP 400 on every message, because temperature and forced
+  tool calls were always sent. Sonnet 5.5 cache reads are priced at
+  $0.10 per million tokens.
+
+**Games and cards**
+
+- **Chat events (#1279).** Prizes pay through the exactly-once payout path:
+  an owed prize is recorded rather than lost, and frozen members can't claim.
+  The 2x Coin Booster now applies. Events post locked and unlock after two
+  seconds, a burst of messages from one person counts once, and an event
+  needs a few different people chatting. Coin drops are sometimes golden (3x)
+  or split between the first three grabbers. New dashboard controls under
+  Economy → Games: on/off, a switch per kind, frequency, an events channel
+  and excluded channels.
+- **Picture cards.** `/leaderboard` and the Hall of Champions (#1215), the
+  Hunt, Fish, Mine and Explore inventory tabs (#1244), the Explorer's Map on
+  `/explore map` (#1264) and the dig site on `/mine map` (#1269). Baked icon
+  art for the fishing, mining, hunting and exploration materials (#1243,
+  #1256, #1257, #1258).
+- **`/mine` (#1217, #1219, #1220).** Fixes to raid, shop, inventory, profile
+  and quests. A raid no longer burns a Mine Lock on an empty mine, and broken
+  pickaxes can be equipped to repair them. Pinned lasts 3–15 minutes by depth
+  instead of a flat 15. A cave-in holds the swing's XP until it is resolved,
+  and fleeing forfeits it. A top-end `/crime` Bluff is announced as a big win.
+- The dashboard's mining icons stopped hitting the `/stats` rate limit, which
+  had left later icons as emoji, and icons that read as rifles were redrawn
+  (#1277, #1278).
+
+**Security and dependencies**
+
+- Data erasure covers polls, scheduled tasks, pending duels and pet battles,
+  AI items, transaction counterparties and the records embedded in guild
+  documents. The ticket cap no longer races (#1218).
+- The MongoDB URI is kept off the mongo tools' command line, and the backup
+  loop removes its config file on exit (#1220). `isPrivateIp` blocks more
+  IPv6 and reserved ranges (#1217).
+- undici 8, with guarded requests driven by undici's own fetch (#1261).
+  discord.js REST gets its own undici Agent, so file uploads stop failing
+  (#1268). body-parser, multer, undici, ip-address, proxy-addr,
+  follow-redirects and brace-expansion are bumped past advisories (#1240,
+  #1256, #1266, #1267). Dependabot updates to dotenv, the GitHub Actions and
+  the Playwright MCP image. `npm run dev` uses `node --watch` instead of
+  nodemon.
+- Two flaky tests are pinned (#1221, #1280).
+
 ## [5.0.0] - 2026-09-25
 
 Migrations through `029_bind_guild_ai_keys`.
