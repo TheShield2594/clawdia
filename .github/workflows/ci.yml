@@ -916,11 +916,25 @@ jobs:
         run: |
           set -u
 
+          # Lowercased, because an image reference must be and the repository
+          # name is not: `github.repository` keeps the owner's capitals
+          # (TheShield2594), and imagetools refuses the reference outright with
+          # "repository name must be lowercase". metadata-action lowercases its
+          # own tags, so the push itself was never affected, but this check
+          # failed that way on every run since it was added and reported "not
+          # checked" each time, which also kept the webhook below from ever
+          # firing. security-scan.yml lowercases its reference for the same
+          # reason.
+          ref=$(printf '%s' "$PUSHED" | tr '[:upper:]' '[:lower:]')
+
           # stdout only. Folding stderr in would let a buildx warning land in
           # front of the JSON and turn a perfectly good manifest into a "not
           # checked", which is the quiet failure this step is meant to remove
-          # rather than add.
-          config=$(docker buildx imagetools inspect "$PUSHED" --format '{{json .Image}}' 2>/dev/null) || config=''
+          # rather than add. stderr is kept apart instead, so that when the
+          # inspect does fail the warning says why. Without the reason, the
+          # lowercase failure above went unnoticed for every release.
+          inspect_err=$(mktemp)
+          config=$(docker buildx imagetools inspect "$ref" --format '{{json .Image}}' 2>"$inspect_err") || config=''
 
           {
             echo '### Scanned-image check'
@@ -928,7 +942,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ -z "$config" ] || ! printf '%s' "$config" | jq -e . >/dev/null 2>&1; then
-            echo "::warning::could not read the published image config, so this run does not say whether the published layers are the scanned ones"
+            reason=$(head -c 300 "$inspect_err" | tr '\n' ' ')
+            echo "::warning::could not read the published image config, so this run does not say whether the published layers are the scanned ones${reason:+ ($reason)}"
             echo 'Not checked — the published image config could not be read.' >> "$GITHUB_STEP_SUMMARY"
             # Unverified is not verified. The webhook below reads this, and an
             # unreadable manifest must not be allowed to auto-deploy on the
