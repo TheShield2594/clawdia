@@ -3,6 +3,23 @@
 // Keep / release in the service (fishService): what a cast leaves on offer,
 // what spending it does, and the river karma a release earns.
 
+// The rarity test below measures a probability shift. It used to sample it —
+// 4,000 real crypto rolls per arm against a fixed 3-point margin — and sampling
+// noise sometimes put the two arms exactly on the margin, failing CI on PRs
+// that never touched fishing. fishService draws from `crypto.randomInt`
+// directly (not the secureRandom test seam), so the seam here is crypto: while
+// `mockGridDraw` is set, `randomInt(max)` answers from it, and otherwise every
+// call goes to the real thing. Named `mock…` because jest.mock's factory may
+// only close over variables with that prefix.
+let mockGridDraw = null;
+jest.mock('crypto', () => {
+    const actual = jest.requireActual('crypto');
+    return {
+        ...actual,
+        randomInt: (...args) => (mockGridDraw && args.length === 1 ? mockGridDraw(args[0]) : actual.randomInt(...args)),
+    };
+});
+
 const {
     recordPendingRelease, releasePlan, applyRelease, declineRelease, rollTier, executeCast, ensureFishingData,
     RELEASE_KARMA_MAX,
@@ -56,10 +73,21 @@ test('keeping closes the offer, once', () => {
 
 describe('river karma', () => {
     const rod = { tier: ROD_TIERS[0].tier, currentDurability: 50, maxDurability: 50, status: 'good' };
+    // The share of rolls landing rare or better, measured over n evenly spaced
+    // draws across [0, 1) instead of n random ones. That walks the tier weights
+    // exactly, so the rate is the true probability to within 1/n, and both arms
+    // see the same draws: the difference between them is karma and nothing else.
     const rareRate = (karma, n = 4000) => {
         const user = { fishing: { prestige: 0, releaseKarma: karma, activeBait: null } };
         let rarePlus = 0;
-        for (let i = 0; i < n; i++) if (!['common', 'uncommon'].includes(rollTier(user, LOCATIONS.pond, rod))) rarePlus += 1;
+        try {
+            for (let i = 0; i < n; i++) {
+                mockGridDraw = max => Math.floor(((i + 0.5) / n) * max);
+                if (!['common', 'uncommon'].includes(rollTier(user, LOCATIONS.pond, rod))) rarePlus += 1;
+            }
+        } finally {
+            mockGridDraw = null;
+        }
         return rarePlus / n;
     };
 
