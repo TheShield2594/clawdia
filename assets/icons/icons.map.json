@@ -64,6 +64,12 @@
       "count": 6,
       "quality": "high",
       "note": "wooden/steel/diamond/void pickaxes, tempered_edge and reinforced_handle: the first pass read as rifles (steel_rifle anchor bleed). Anchored to mine:iron_pickaxe (02d6e472-…) instead; wooden_pickaxe to the new steel_pickaxe after its first retry came back on a filled disc."
+    },
+    "fishGripRegenerated": {
+      "date": "2026-11-02",
+      "count": 1,
+      "quality": "high",
+      "note": "fish:reinforced_grip read as a rifle; regenerated against fish:enhanced_line (43e3ecf2-…) instead of the rifle anchor."
     }
   },
   "items": {
@@ -366,14 +372,14 @@
     },
     "fish:reinforced_grip": {
       "file": "fish__reinforced_grip.png",
-      "jobId": "51385d4c-602c-4514-ae1d-b6c4ea6d1ea8",
+      "jobId": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "43e3ecf2-ea1a-41bc-b5e2-2ba21bb3998e",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173355_51385d4c-602c-4514-ae1d-b6c4ea6d1ea8.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_172113_d4a93f1f-7b85-4118-86c4-a59dca4d1009.png"
     },
     "mine:tempered_edge": {
       "file": "mine__tempered_edge.png",

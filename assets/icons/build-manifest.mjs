@@ -123,7 +123,8 @@ const SUBJECT = {
     // fish upgrades / bait
     enhanced_line: 'a spool of strong braided fishing line, a neat coil of thin high-tensile line.',
     polarized_lens: 'a pair of polarized sunglasses with sleek dark frames and a blue reflective sheen.',
-    reinforced_grip: 'a reinforced rubber fishing-rod grip handle with metal bracing.',
+    // Regenerated 2026-11-02: "fishing-rod grip handle" came back as a rifle.
+    reinforced_grip: 'a short fishing-rod handle section standing upright: a fat cylindrical cork grip bound with two steel bands, a metal reel seat above it and a round rubber butt cap below. No rod, no reel, nothing behind the object.',
     worm_bait_pack: 'a small plastic tub of pink fishing worms.',
     shrimp_bait_pack: 'a small tub of pink shrimp bait.',
     lure_pack: 'a set of shiny metal fishing lures with treble hooks.',

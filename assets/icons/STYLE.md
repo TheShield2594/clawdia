@@ -354,6 +354,11 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-11-02** — **Fishing `reinforced_grip` regenerated.** It read as a
+  rifle, like the mining gear below. Now a cork rod handle with steel bands, a
+  reel seat and a butt cap. Referenced `fish:enhanced_line` (`43e3ecf2-…`)
+  instead of the rifle anchor (§3). 1.5 credits, one try.
+
 - **2026-11-02** — **Mining gear regenerated: 6 icons.** The wooden, steel,
   diamond and void pickaxes and the `tempered_edge` upgrade read as rifles, and
   `reinforced_handle` sat on a smudged green haze. Prompts now spell out the
