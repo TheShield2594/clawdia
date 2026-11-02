@@ -89,12 +89,18 @@ const ROD_SUBJECT = {
     crystal_rod:    'Same silhouette as a fishing rod: a translucent glowing crystal rod shaft with an ornate reel and a soft magical glow, enchanted line with a shimmering lure. Angled diagonally from lower-left to upper-right.',
 };
 
+// The shared silhouette is spelled out shape-first. The first pass named only
+// "a mining pickaxe" and let the style anchor (hunt:steel_rifle) fill in the
+// shape, and three of the five came back as long-barrelled rifles with a blade
+// on the end. Regenerated 2026-11-02 against the iron pickaxe (the one that
+// came out right) as the reference instead of the rifle — see STYLE.md §3.
+const PICKAXE_SHAPE = 'A classic T-shaped mining pickaxe: a short straight handle with a curved, double-pointed pick head mounted crosswise at its top end, both points curving down like a crescent. The handle is about twice as long as the head is wide.';
 const PICKAXE_SUBJECT = {
-    wooden_pickaxe:  'Same silhouette as a mining pickaxe: a rough hewn stone-and-wood head on a sturdy wooden handle. Angled diagonally from lower-left to upper-right.',
+    wooden_pickaxe:  `${PICKAXE_SHAPE} A rough-hewn grey stone pick head lashed to a plain wooden handle with rope. Angled diagonally, handle lower-left, head upper-right.`,
     iron_pickaxe:    'Same silhouette as a mining pickaxe: a forged iron head on a wooden handle with a riveted band. Angled diagonally from lower-left to upper-right.',
-    steel_pickaxe:   'Same silhouette as a mining pickaxe: a hardened polished steel head on a reinforced wooden handle. Angled diagonally from lower-left to upper-right.',
-    diamond_pickaxe: 'Same silhouette as a mining pickaxe: a steel head tipped with glittering diamond edges on a metal-banded handle, a faint sparkle. Angled diagonally from lower-left to upper-right.',
-    void_pickaxe:    'Same silhouette as a mining pickaxe: a dark void-matter head wreathed in purple smoke on an obsidian handle, a soft purple magical glow. Angled diagonally from lower-left to upper-right.',
+    steel_pickaxe:   `${PICKAXE_SHAPE} A bright polished steel pick head on a wooden handle with a steel collar and a leather-wrapped grip. Angled diagonally, handle lower-left, head upper-right.`,
+    diamond_pickaxe: `${PICKAXE_SHAPE} A steel pick head whose two points are capped with faceted pale-blue diamond tips, on a metal-banded wooden handle, one small sparkle. Angled diagonally, handle lower-left, head upper-right.`,
+    void_pickaxe:    `${PICKAXE_SHAPE} A jet-black void-matter pick head with thin glowing purple cracks and a wisp of purple smoke, on a dark obsidian handle. Angled diagonally, handle lower-left, head upper-right.`,
 };
 
 // --- non-ladder subjects, keyed by bare id ----------------------------------
@@ -130,9 +136,12 @@ const SUBJECT = {
     energy_drink: 'a tall can of energy drink with a lightning-bolt logo.',
     hunters_brew: 'a bubbling brown potion in a glass Erlenmeyer flask.',
     // mine upgrades / blasts
-    tempered_edge: 'a gleaming honed tempered pickaxe blade edge.',
+    // Regenerated 2026-11-02: "pickaxe blade edge" came back as a rifle with a
+    // blade, and the handle as a lone rod over a green haze. Both now name a
+    // part that cannot be read as a gun, and nothing behind it.
+    tempered_edge: 'a lone curved, double-pointed iron pickaxe head with no handle, its points freshly honed to a bright silver edge, a small grey whetstone resting against it. Nothing behind the object.',
     gem_lens: "a jeweler's gem loupe, a small magnifying lens in a metal frame with a faint gem sparkle.",
-    reinforced_handle: 'a reinforced pickaxe handle wrapped in metal bracing and grip tape.',
+    reinforced_handle: 'a short, thick wooden tool handle standing upright, bound with three riveted steel bands and a dark leather grip wrap at the base. Nothing behind the object.',
     iron_blast_pack: 'a bundle of iron blasting charges tied together with a fuse.',
     steel_blast_pack: 'a cluster of round steel bombs with short lit fuses.',
     explosive_charge_pack: 'a bundle of red dynamite explosive charges tied together.',

@@ -127,6 +127,14 @@ reference, not an uploaded item.
 Do not anchor to a strongly tinted or glowing icon — it pushes that property
 onto everything generated against it.
 
+**Long, thin tools: reference a sibling, not the rifle.** The anchor carries
+silhouette as well as style. Pickaxes and pickaxe parts generated against it
+came back as long-barrelled rifles with a blade on the end, so the 2026-11-02
+regeneration referenced `mine:iron_pickaxe` (`02d6e472-561a-4129-a40b-b3cd33a43826`,
+itself made against the anchor) and spelled the shape out in the prompt
+(`PICKAXE_SHAPE` in `build-manifest.mjs`). Do the same for any new tool whose
+outline the rifle could hijack.
+
 ### Legacy — `gpt_image_2`, 2026-09-21 (reference only)
 
 The 20 `gpt_image_2` icons (flat white backgrounds, cel shading) are a visual
@@ -345,6 +353,17 @@ Activity accents from `src/utils/shopBanner.js`:
 Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
+
+- **2026-11-02** — **Mining gear regenerated: 6 icons.** The wooden, steel,
+  diamond and void pickaxes and the `tempered_edge` upgrade read as rifles, and
+  `reinforced_handle` sat on a smudged green haze. Prompts now spell out the
+  T-shaped pick silhouette (`PICKAXE_SHAPE`) and name parts that can't be read
+  as a gun. Referenced `mine:iron_pickaxe` instead of the rifle anchor (§3).
+  `wooden_pickaxe` was regenerated once more, against the new `steel_pickaxe`,
+  after its first try came back on a filled disc. One submission came back 429
+  and was resubmitted. Same settings otherwise (1.5 credits each, ~10.5 total).
+  Job ids + urls in `icons.map.json`, and the PNGs are re-baked into
+  `src/assets/item-icons/` (the other 478 baked byte-identical).
 
 - **2026-10-22** — **Exploration materials: 11 of 11** (issue #1172). Keyed
   `explore:<id>` through the shared `MATERIAL_ITEMS` registry, beside the region
