@@ -76,41 +76,47 @@
       "count": 5,
       "quality": "high",
       "note": "all five rods grew rifle stocks/scopes (steel_rifle anchor bleed). Anchored to the new fish:reinforced_grip (d4a93f1f-…); carbon_rod redone against the new fiberglass_rod after a grey haze."
+    },
+    "huntGearRegenerated": {
+      "date": "2026-11-02",
+      "count": 4,
+      "quality": "high",
+      "note": "T1–T3 rifles carried a scope (STYLE.md §4 puts it at T4) and wooden/iron sat on a filled disc; iron_shot_pack sat on a filled disc. Rifles referenced the shipped hunt:steel_rifle (309b1ed7-…), the pack hunt:steel_shot_pack (8d2ed594-…)."
     }
   },
   "items": {
     "hunt:wooden_rifle": {
       "file": "hunt__wooden_rifle.png",
-      "jobId": "e0c27ff0-ed8d-48f3-a740-6e5433e1e034",
+      "jobId": "b4c0d843-de85-453b-ae7c-8cfed6e00baa",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "309b1ed7-83a1-43e0-9163-7bf4f66d7799",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171709_e0c27ff0-ed8d-48f3-a740-6e5433e1e034.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_175512_b4c0d843-de85-453b-ae7c-8cfed6e00baa.png"
     },
     "hunt:iron_rifle": {
       "file": "hunt__iron_rifle.png",
-      "jobId": "406950f4-e2c2-48a3-9609-0a1f1b638d09",
+      "jobId": "3ab33612-fe3d-45ee-946e-72a77ffd44a7",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "309b1ed7-83a1-43e0-9163-7bf4f66d7799",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_174743_406950f4-e2c2-48a3-9609-0a1f1b638d09.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_175510_3ab33612-fe3d-45ee-946e-72a77ffd44a7.png"
     },
     "hunt:copper_rifle": {
       "file": "hunt__copper_rifle.png",
-      "jobId": "b2b7057d-4a6e-44fe-a88b-25d0590cdcaf",
+      "jobId": "4be5f7ff-8868-4fa4-8c03-1c4784367823",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "309b1ed7-83a1-43e0-9163-7bf4f66d7799",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171838_b2b7057d-4a6e-44fe-a88b-25d0590cdcaf.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_175512_4be5f7ff-8868-4fa4-8c03-1c4784367823.png"
     },
     "hunt:steel_rifle": {
       "file": "hunt__steel_rifle.png",
@@ -422,14 +428,14 @@
     },
     "hunt:iron_shot_pack": {
       "file": "hunt__iron_shot_pack.png",
-      "jobId": "bf663120-c027-4e2c-8270-2cc89f675f77",
+      "jobId": "d0c2d148-437c-4076-9c28-58e24843578d",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "8d2ed594-fd1c-4004-a5c4-3840aee9c183",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_172211_bf663120-c027-4e2c-8270-2cc89f675f77.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_175511_d0c2d148-437c-4076-9c28-58e24843578d.png"
     },
     "hunt:steel_shot_pack": {
       "file": "hunt__steel_shot_pack.png",

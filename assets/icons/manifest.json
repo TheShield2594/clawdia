@@ -6,7 +6,7 @@
     "rarity": "Common",
     "rim": "silver-grey",
     "rimHex": "#AAAAAA",
-    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: raw timber barrel and receiver, plain wooden stock, a rope-wrapped grip. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: raw timber barrel and receiver, plain wooden stock, a rope-wrapped grip. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
     "index": 1,
@@ -15,7 +15,7 @@
     "rarity": "Common",
     "rim": "silver-grey",
     "rimHex": "#AAAAAA",
-    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: forged iron barrel and receiver, plain wooden stock, a riveted iron band around the barrel. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: forged iron barrel and receiver, plain wooden stock, a riveted iron band around the barrel. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
     "index": 2,
@@ -24,7 +24,7 @@
     "rarity": "Uncommon",
     "rim": "emerald-green",
     "rimHex": "#2ECC71",
-    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: polished copper and brass barrel and receiver, dark wooden stock, delicate engraved scrollwork. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: polished copper and brass barrel and receiver, dark wooden stock, delicate engraved scrollwork. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
     "index": 3,
@@ -285,7 +285,7 @@
     "rarity": "Common",
     "rim": "silver-grey",
     "rimHex": "#AAAAAA",
-    "prompt": "Game item icon: an open cardboard box of iron shotgun shells, brass-capped orange shells spilling out. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+    "prompt": "Game item icon: an open cardboard box of iron shotgun shells, brass-capped orange shells spilling out. Nothing behind the object: the inside of the rim is empty and transparent. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
     "index": 32,

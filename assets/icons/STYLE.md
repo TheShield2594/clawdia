@@ -355,6 +355,16 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-11-02** — **Hunting: 3 rifles and 1 ammo pack regenerated.** The
+  Wooden, Iron and Copper rifles (T1–T3) all carried a scope, which §4 puts at
+  T4, so the bottom of the ladder looked like the middle. Wooden and Iron also
+  sat on a filled disc. Their prompts now name open iron sights with nothing
+  on the receiver. `iron_shot_pack` sat on a filled disc too. Every prompt
+  says the inside of the rim is empty. Rifles referenced the shipped
+  `hunt:steel_rifle` (`309b1ed7-…`) so the silhouette matches the T4 they lead
+  to; the pack referenced `hunt:steel_shot_pack`. 1.5 credits each, all first
+  try.
+
 - **2026-11-02** — **Fishing rods regenerated: 5 of 5.** Every tier had picked
   up the rifle anchor's outline (stocks on fiberglass and carbon, a scope and
   stock on titanium and crystal), and bamboo sat on a smudged filled disc. The

@@ -66,10 +66,14 @@ const PLACE_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary']; // zon
 const PACK_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic']; // ammo, bait, blast (4 packs)
 
 // --- ladder subjects (STYLE.md §4: same silhouette, escalate material+detail)-
+// T1–T3 name their sights outright. The scope first appears at T4 (STYLE.md
+// §4), but the first pass left the sights unsaid and all three picked up the
+// steel_rifle anchor's scope, and the two Common ones sat on a filled disc.
+// Regenerated 2026-11-02.
 const RIFLE_SUBJECT = {
-    wooden_rifle:     'Same silhouette as a basic hunting rifle: raw timber barrel and receiver, plain wooden stock, a rope-wrapped grip. Angled diagonally from lower-left to upper-right.',
-    iron_rifle:       'Same silhouette as a basic hunting rifle: forged iron barrel and receiver, plain wooden stock, a riveted iron band around the barrel. Angled diagonally from lower-left to upper-right.',
-    copper_rifle:     'Same silhouette as a basic hunting rifle: polished copper and brass barrel and receiver, dark wooden stock, delicate engraved scrollwork. Angled diagonally from lower-left to upper-right.',
+    wooden_rifle:     'Same silhouette as a basic hunting rifle: raw timber barrel and receiver, plain wooden stock, a rope-wrapped grip. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent.',
+    iron_rifle:       'Same silhouette as a basic hunting rifle: forged iron barrel and receiver, plain wooden stock, a riveted iron band around the barrel. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent.',
+    copper_rifle:     'Same silhouette as a basic hunting rifle: polished copper and brass barrel and receiver, dark wooden stock, delicate engraved scrollwork. Angled diagonally from lower-left to upper-right. Open iron sights only: a small front blade and a rear notch, with nothing mounted on top of the receiver. Nothing behind the object: the inside of the rim is empty and transparent.',
     steel_rifle:      'Same silhouette as a basic hunting rifle: polished steel barrel and receiver, dark synthetic stock, a compact telescopic scope mounted on top. Angled diagonally from lower-left to upper-right.',
     cobalt_rifle:     'Same silhouette as a basic hunting rifle: cobalt-blue alloy barrel and receiver, dark synthetic stock, a telescopic scope, and a faint blue energy glow running along the barrel. Angled diagonally from lower-left to upper-right.',
     gold_rifle:       'Same silhouette as a basic hunting rifle: gleaming gold barrel and receiver, dark lacquered stock, ornate engraved filigree, a telescopic scope, glowing accents. Angled diagonally from lower-left to upper-right.',
@@ -114,7 +118,7 @@ const SUBJECT = {
     rifled_barrel: 'a machined steel rifle barrel section with visible internal rifling grooves.',
     scope: 'a compact black telescopic rifle scope with glass lenses and adjustment turrets.',
     reinforced_stock: 'a heavy-duty reinforced rifle stock padded with metal bracing.',
-    iron_shot_pack: 'an open cardboard box of iron shotgun shells, brass-capped orange shells spilling out.',
+    iron_shot_pack: 'an open cardboard box of iron shotgun shells, brass-capped orange shells spilling out. Nothing behind the object: the inside of the rim is empty and transparent.',
     steel_shot_pack: 'an open cardboard box of dark steel shotgun shells with gunmetal casings.',
     composite_round_pack: 'an open box of sleek blue composite rifle rounds.',
     titanium_round_pack: 'an open box of gleaming titanium rifle rounds with a diamond sheen.',

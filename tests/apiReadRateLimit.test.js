@@ -68,19 +68,24 @@ describe('readRateLimitOptions builds a working limiter', () => {
 // router's own paths, not bare: a pathless router.use meters every request that
 // passes through the router on its way to a later one, which counted every
 // item-image <img> on the economy panel against the 60-a-minute stats ceiling.
+//
+// Each mount names its paths, and every one must be there: dropping one leaves
+// its route on the shared 120-a-minute budget with nothing in the source to say
+// so (/insights would lose its 60-a-minute ceiling).
 const FILES = [
-    ['stats.js',      'statsReadRateLimit'],
-    ['itemImages.js', 'imageReadRateLimit'],
+    ['stats.js',      'statsReadRateLimit', ['/guild/:guildId/stats', '/guild/:guildId/insights']],
+    ['itemImages.js', 'imageReadRateLimit', ['/item-image']],
 ];
 
 describe('each router installs its read limiter ahead of its routes', () => {
-    test.each(FILES)('%s mounts %s with router.use before any route', (file, limiter) => {
+    test.each(FILES)('%s mounts %s with router.use before any route', (file, limiter, paths) => {
         const src = fs.readFileSync(
             path.join(__dirname, '..', 'src', 'dashboard', 'routes', 'api', file), 'utf8',
         );
         const mount = src.match(new RegExp(`router\\.use\\(([^)]*?),\\s*${limiter}\\)`));
         expect(mount).not.toBeNull();
         expect(mount[1]).toMatch(/^\s*[['"]/);
+        for (const p of paths) expect(mount[1]).toContain(`'${p}'`);
         const useIdx = mount.index;
         const firstRoute = src.search(/router\.(get|post|put|patch|delete)\(/);
         expect(useIdx).toBeGreaterThan(-1);
