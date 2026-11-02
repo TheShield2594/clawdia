@@ -133,7 +133,8 @@ came back as long-barrelled rifles with a blade on the end, so the 2026-11-02
 regeneration referenced `mine:iron_pickaxe` (`02d6e472-561a-4129-a40b-b3cd33a43826`,
 itself made against the anchor) and spelled the shape out in the prompt
 (`PICKAXE_SHAPE` in `build-manifest.mjs`). Do the same for any new tool whose
-outline the rifle could hijack.
+outline the rifle could hijack. The fishing rods were redone the same way the
+same day (`ROD_SHAPE`, against `fish:reinforced_grip`).
 
 ### Legacy — `gpt_image_2`, 2026-09-21 (reference only)
 
@@ -353,6 +354,15 @@ Activity accents from `src/utils/shopBanner.js`:
 Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
+
+- **2026-11-02** — **Fishing rods regenerated: 5 of 5.** Every tier had picked
+  up the rifle anchor's outline (stocks on fiberglass and carbon, a scope and
+  stock on titanium and crystal), and bamboo sat on a smudged filled disc. The
+  prompts now open with a shared `ROD_SHAPE` (thin tapering pole, straight
+  handle, line guides, line to a hook, nothing inside the rim). Referenced the
+  new `fish:reinforced_grip` (`d4a93f1f-…`) instead of the rifle (§3).
+  `carbon_rod` was redone once, against the new `fiberglass_rod`, after a grey
+  haze by its tip. 1.5 credits each, 9 total.
 
 - **2026-11-02** — **Fishing `reinforced_grip` regenerated.** It read as a
   rifle, like the mining gear below. Now a cork rod handle with steel bands, a

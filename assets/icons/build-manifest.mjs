@@ -81,12 +81,17 @@ const RIFLE_SUBJECT = {
     altair_rifle:     'Same silhouette as a basic hunting rifle: cosmic blue-black barrel and receiver with a swirling starfield surface and glowing constellation points, a telescopic scope, a cosmic glow. Angled diagonally from lower-left to upper-right.',
 };
 
+// Shape first, as with the pickaxes below. The first pass said only "a fishing
+// rod", and against the hunt:steel_rifle anchor the higher tiers grew stocks and
+// scopes. Regenerated 2026-11-02 against the new fish:reinforced_grip (a correct
+// rod handle) as the reference instead of the rifle — see STYLE.md §3.
+const ROD_SHAPE = 'A long, slender fishing rod: a thin straight pole that tapers to a fine tip, with a straight cylindrical handle at its lower end the same width as the pole, small ring line guides along the pole, and a thin curved fishing line running from the tip down to a small hook. Angled diagonally, handle lower-left, tip upper-right. Nothing behind the object: the inside of the rim is empty and transparent.';
 const ROD_SUBJECT = {
-    bamboo_rod:     'Same silhouette as a fishing rod: a natural bamboo rod shaft with a simple cord wrap, no reel, fishing line hanging with a small hook. Angled diagonally from lower-left to upper-right.',
-    fiberglass_rod: 'Same silhouette as a fishing rod: a green fiberglass rod shaft with a simple spinning reel, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    carbon_rod:     'Same silhouette as a fishing rod: a black carbon-fiber rod shaft with a precision spinning reel and metal handle, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    titanium_rod:   'Same silhouette as a fishing rod: a polished titanium rod shaft with a high-end machined reel and a subtle metallic sheen, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    crystal_rod:    'Same silhouette as a fishing rod: a translucent glowing crystal rod shaft with an ornate reel and a soft magical glow, enchanted line with a shimmering lure. Angled diagonally from lower-left to upper-right.',
+    bamboo_rod:     `${ROD_SHAPE} A natural yellow bamboo pole with visible joints and a simple cord-wrapped handle, no reel.`,
+    fiberglass_rod: `${ROD_SHAPE} A green fiberglass pole with a cork handle and a small grey spinning reel hanging beneath the handle.`,
+    carbon_rod:     `${ROD_SHAPE} A black carbon-fiber pole with a dark foam handle and a precise silver-and-blue spinning reel hanging beneath the handle.`,
+    titanium_rod:   `${ROD_SHAPE} A polished silver titanium pole with a black foam handle and a machined purple-anodised spinning reel hanging beneath the handle.`,
+    crystal_rod:    `${ROD_SHAPE} A translucent pale-cyan crystal pole with a soft glow, a gold-banded handle, an ornate gold reel hanging beneath the handle, and a shimmering lure on the line.`,
 };
 
 // The shared silhouette is spelled out shape-first. The first pass named only
