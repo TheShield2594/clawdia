@@ -141,6 +141,87 @@ describe('#952 — a publish that is not the scanned image is reported', () => {
     });
 });
 
+// The check above, run for real. It had never worked on this repository:
+// `github.repository` keeps the owner's capitals, buildx refuses an uppercase
+// image reference, and the step reported "not checked" on every release,
+// including 6.0.0, whose arm64 image was rebuilt after its scan.
+describe('the scanned-image check, run against a stubbed registry', () => {
+    const { spawnSync } = require('child_process');
+    const os = require('os');
+
+    const checkStep = stepsOf('publish').find(s => s.id === 'scanned');
+    const amd64 = ['sha256:aa01', 'sha256:aa02'];
+    const arm64 = ['sha256:bb01', 'sha256:bb02'];
+
+    // A `docker` that answers `buildx imagetools inspect` the way buildx does:
+    // an uppercase reference is an error on stderr, otherwise the per-platform
+    // image configs.
+    function run({ pushed, published }) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scanned-check-'));
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(bin);
+        if (published !== undefined) fs.writeFileSync(path.join(dir, 'image.json'), JSON.stringify(published));
+        fs.writeFileSync(path.join(bin, 'docker'), [
+            '#!/bin/sh',
+            'for arg; do ref=$arg; case $arg in ghcr.io/*) break ;; esac; done',
+            'case $ref in *[A-Z]*) echo "ERROR: invalid reference format: repository name must be lowercase" >&2; exit 1 ;; esac',
+            `[ -f "${path.join(dir, 'image.json')}" ] || { echo "ERROR: manifest unknown" >&2; exit 1; }`,
+            `cat "${path.join(dir, 'image.json')}"`,
+        ].join('\n'), { mode: 0o755 });
+        const script = path.join(dir, 'step.sh');
+        fs.writeFileSync(script, checkStep.run);
+        const summary = path.join(dir, 'summary.md');
+        const output = path.join(dir, 'output.txt');
+        fs.writeFileSync(summary, '');
+        fs.writeFileSync(output, '');
+
+        const result = spawnSync('bash', ['-e', script], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH: `${bin}:${process.env.PATH}`,
+                PUSHED: pushed,
+                SCANNED_AMD64: JSON.stringify(amd64),
+                SCANNED_ARM64: JSON.stringify(arm64),
+                GITHUB_STEP_SUMMARY: summary,
+                GITHUB_OUTPUT: output,
+            },
+        });
+        const read = file => fs.readFileSync(file, 'utf8');
+        const out = { status: result.status, log: result.stdout + result.stderr, summary: read(summary), output: read(output) };
+        fs.rmSync(dir, { recursive: true, force: true });
+        return out;
+    }
+
+    const configs = (amd, arm) => ({
+        'linux/amd64': { rootfs: { diff_ids: amd } },
+        'linux/arm64': { rootfs: { diff_ids: arm } },
+    });
+    const PUSHED = 'ghcr.io/TheShield2594/clawdia@sha256:6e6f';
+
+    test('an uppercase repository owner still gets checked', () => {
+        const r = run({ pushed: PUSHED, published: configs(amd64, arm64) });
+        expect(r.status).toBe(0);
+        expect(r.summary).toMatch(/linux\/amd64 \| match the scanned image/);
+        expect(r.summary).toMatch(/linux\/arm64 \| match the scanned image/);
+        expect(r.output).toMatch(/verified=true/);
+    });
+
+    test('a platform rebuilt after its scan is flagged and blocks the webhook', () => {
+        const r = run({ pushed: PUSHED, published: configs(amd64, ['sha256:bb01', 'sha256:ffff']) });
+        expect(r.summary).toMatch(/linux\/amd64 \| match the scanned image/);
+        expect(r.summary).toMatch(/linux\/arm64 \| \*\*DO NOT DEPLOY\*\*/);
+        expect(r.output).toMatch(/verified=false/);
+    });
+
+    test('an inspect that fails says why, and is not a pass', () => {
+        const r = run({ pushed: PUSHED, published: undefined });
+        expect(r.summary).toMatch(/Not checked/);
+        expect(r.output).toMatch(/verified=false/);
+        expect(r.log).toMatch(/::warning::could not read the published image config.*\(ERROR: manifest unknown/);
+    });
+});
+
 describe('#953 — a published image announces itself', () => {
     const summaryStep = stepsOf(publishJob).find(s => /### Image/.test(s.run || ''));
 
