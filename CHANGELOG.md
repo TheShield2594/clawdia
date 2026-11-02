@@ -39,6 +39,10 @@ image can still run against this database.
   behind a proxy on a public address (a CDN, another VM): set `TRUST_PROXY`
   (`1`, or the proxy's addresses) or the per-IP limits and the secure cookie
   will see the proxy instead of the client. `TRUST_PROXY=true` is refused.
+  Use `1` only when the dashboard can be reached solely through that proxy:
+  a client connecting directly could otherwise send its own
+  `X-Forwarded-For` and pick its own rate-limit address. Naming the proxy's
+  addresses avoids that.
 - **Sealed backups carry a tag, and restore checks it (#1218).**
   `restore.sh` and `verify-backup.sh` refuse a sealed archive whose `.tag` is
   missing or wrong. Archives sealed before this release have no tag; open one
