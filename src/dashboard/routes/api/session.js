@@ -26,7 +26,12 @@ const { readRateLimitOptions } = require('../../lib/readRateLimit');
 // invisible to CodeQL's js/missing-rate-limiting. The ceiling is generous — a
 // probe fires on a suspected expiry and when a backgrounded tab regains focus,
 // not in a loop.
-router.use(rateLimit(readRateLimitOptions(120)));
+//
+// Mounted on its own path: this router sits ahead of most of the API, and a bare
+// pathless use() meters every request that merely passes through it on the way to
+// a later router — which counted every item-image <img> on the economy panel
+// against this probe's ceiling.
+router.use('/session', rateLimit(readRateLimitOptions(120)));
 
 // Whether this session still authenticates: 200 when it does, 401 when it does
 // not, and never a redirect — the unambiguous signal the banner confirms against.

@@ -14,10 +14,12 @@ const { getDefaultItemImage } = require('../../../utils/defaultItemImages');
 // ~80-item catalogue), so the ceiling sits above a full page's worth while still
 // bounding a client that scrapes ids. Installed with router.use so it guards
 // every route in this router — to CodeQL and at runtime (see lib/readRateLimit.js).
+// Mounted on /item-image rather than bare, so it meters only these routes and not
+// every request that passes through this router to the ones mounted after it.
 // The writes it also covers are already the tighter-limited path, so the 300/min
 // read ceiling never binds first for them.
 const imageReadRateLimit = rateLimit(readRateLimitOptions(300));
-router.use(imageReadRateLimit);
+router.use('/item-image', imageReadRateLimit);
 
 // M4: Validate image files by magic bytes rather than trusting the client-supplied
 // MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).
