@@ -262,8 +262,22 @@ const guildSchema = new Schema({
         workMax: { type: Number, default: 150 },
         shopEnabled: { type: Boolean, default: true },
         gamesEnabled: { type: Boolean, default: true },
-        // Ambient chat events (airdrops, crates, flash trivia) — see chatEventService
+        // Ambient chat events (coin drops, supply crates, flash trivia) — see
+        // src/services/chatEventService.js, which reads all of these.
         chatEventsEnabled: { type: Boolean, default: true },
+        // How often they fire: a preset over the message count, cooldown and
+        // per-message chance (FREQUENCY_PRESETS in chatEventService).
+        chatEventFrequency: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
+        // When set, every event posts here, whichever channel the chat that
+        // earned it was in. Null posts in the channel the chat happened in.
+        chatEventChannelId: { type: String, default: null },
+        // Chat here never counts toward an event, and no event lands here.
+        // A thread inherits its parent channel's exclusion.
+        chatEventExcludedChannelIds: { type: [String], default: [] },
+        // Per-kind switches. With all three off, nothing fires.
+        chatEventAirdropsEnabled: { type: Boolean, default: true },
+        chatEventCratesEnabled:   { type: Boolean, default: true },
+        chatEventTriviaEnabled:   { type: Boolean, default: true },
         // `coinflipEnabled`/`rollEnabled` were removed in #1019 when the two
         // wagering games folded into the casino as `/casino coinflip` and
         // `/casino dice`; `casinoEnabled` is the switch for both now. Migration

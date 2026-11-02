@@ -724,6 +724,25 @@ third of the code. The sections below cover it in full.
 - Daily reward amount
 - Work reward range (min-max)
 
+**Chat events:** every so often, active chat earns a claimable event in the
+channel — first click wins:
+
+- 🪂 **Coin drop** — 500–2,000 coins.
+- 📦 **Supply crate** — a random store item (Lucky Charm, 2x boosters, Lucky
+  Streak, or a rare Lifesaver), revealed with its art, rarity and shop value.
+- ⚡ **Flash trivia** — 1,000 coins for the first correct answer, one guess each.
+
+Coin prizes are doubled by an active 2x Coin Booster. Members whose economy is
+frozen can't claim. A prize that can't be credited is recorded as owed and paid
+by `npm run payouts:replay`, never lost or paid twice.
+
+Configured under **Economy → Games → Chat events**: a master switch, a switch
+per kind, how often they fire (Rarely / Normal / Often), an optional events
+channel every event posts in, and excluded channels whose chat never counts and
+where nothing lands (threads follow their parent). Events only fire where the
+bot can view, send and embed; if an events channel is set but unusable, events
+wait rather than landing somewhere else.
+
 ### Gathering, Crafting & Pets
 
 **Gathering:** `/fish`, `/hunt`, and `/mine` are three parallel grind tracks,

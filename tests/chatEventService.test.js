@@ -298,3 +298,90 @@ describe('spawning', () => {
         expect(guildState.get('g1').messagesSince).toBe(0);
     });
 });
+
+describe('admin controls', () => {
+    const { FREQUENCY_PRESETS } = chatEventService.__test__;
+    beforeEach(() => guildState.clear());
+
+    async function chat(message, settings, times) {
+        for (let n = 0; n < times; n++) await chatEventService.maybeTriggerChatEvent(message, settings);
+    }
+
+    test('the master switch stops everything', async () => {
+        const { message } = makeMessage();
+        await chat(message, { economy: { chatEventsEnabled: false } }, 50);
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(guildState.size).toBe(0);
+    });
+
+    test('the frequency preset sets the message threshold', async () => {
+        const { message } = makeMessage();
+        const settings = { economy: { chatEventFrequency: 'low' } };
+        await chat(message, settings, FREQUENCY_PRESETS.low.minMessages - 1);
+        expect(message.channel.send).not.toHaveBeenCalled();
+        await chat(message, settings, 1);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+
+        guildState.clear();
+        const fast = makeMessage();
+        await chat(fast.message, { economy: { chatEventFrequency: 'high' } }, FREQUENCY_PRESETS.high.minMessages);
+        expect(fast.message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('an unknown frequency falls back to normal', async () => {
+        const { message } = makeMessage();
+        await chat(message, { economy: { chatEventFrequency: 'ludicrous' } }, FREQUENCY_PRESETS.normal.minMessages);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('chat in an excluded channel never counts, nor does chat in its threads', async () => {
+        const { message } = makeMessage();
+        message.channel.id = 'serious';
+        const settings = { economy: { chatEventExcludedChannelIds: ['serious'] } };
+        await chat(message, settings, 50);
+        expect(guildState.get('g1')).toBeUndefined();
+
+        const thread = makeMessage();
+        thread.message.channel.id = 'thread1';
+        thread.message.channel.parentId = 'serious';
+        await chat(thread.message, settings, 50);
+        expect(thread.message.channel.send).not.toHaveBeenCalled();
+    });
+
+    test('an events channel receives the event instead of the chat channel', async () => {
+        const { message } = makeMessage();
+        const events = makeMessage().message.channel;
+        events.id = 'events';
+        message.guild.channels = { cache: new Map([['events', events]]) };
+
+        await chat(message, { economy: { chatEventChannelId: 'events' } }, MIN_MESSAGES_BETWEEN);
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(events.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('a missing events channel holds the event and keeps the cooldown', async () => {
+        const { message } = makeMessage();
+        message.guild.channels = { cache: new Map() };
+        await chat(message, { economy: { chatEventChannelId: 'gone' } }, MIN_MESSAGES_BETWEEN);
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(guildState.get('g1').lastEventAt).toBe(0);
+    });
+
+    test('per-kind switches choose among what is left on', async () => {
+        // Math.random is pinned to 0, which picks the first enabled kind.
+        const { message } = makeMessage();
+        getQuestion.mockResolvedValue({ question: 'Q?', correct_answer: 'A', incorrect_answers: ['B'] });
+        await chat(message, {
+            economy: { chatEventAirdropsEnabled: false, chatEventCratesEnabled: false },
+        }, MIN_MESSAGES_BETWEEN);
+        expect(message.channel.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('Trivia');
+    });
+
+    test('with every kind off nothing fires', async () => {
+        const { message } = makeMessage();
+        await chat(message, {
+            economy: { chatEventAirdropsEnabled: false, chatEventCratesEnabled: false, chatEventTriviaEnabled: false },
+        }, 50);
+        expect(message.channel.send).not.toHaveBeenCalled();
+    });
+});

@@ -936,6 +936,10 @@ textarea { resize: vertical; min-height: 80px; }
 /* A section head that opens a new group below an existing one. */
 .eco-section-head.eco-section-gap { margin-top: 1.5rem; }
 .eco-section-head .eco-section-title { flex: 1; }
+/* A chip list fed by a picker beside it — the chat-event excluded channels. */
+.chip-list { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+.chip-picker { display: flex; gap: .5rem; align-items: center; }
+.chat-event-field-gap { margin-top: 1rem; }
 .store-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));

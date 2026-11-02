@@ -150,6 +150,15 @@ function buildSettingsPayload(section, ctx = {}) {
             'economy.robEnabled': document.getElementById('economy-rob-enabled').checked,
             'economy.quizEnabled': document.getElementById('economy-quiz-enabled').checked,
             'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
+            'economy.chatEventsEnabled': document.getElementById('economy-chat-events-enabled').checked,
+            'economy.chatEventAirdropsEnabled': document.getElementById('economy-chat-event-airdrops').checked,
+            'economy.chatEventCratesEnabled': document.getElementById('economy-chat-event-crates').checked,
+            'economy.chatEventTriviaEnabled': document.getElementById('economy-chat-event-trivia').checked,
+            'economy.chatEventFrequency': document.getElementById('economy-chat-event-frequency').value || 'normal',
+            'economy.chatEventChannelId': document.getElementById('economy-chat-event-channel').value || null,
+            'economy.chatEventExcludedChannelIds': Array.from(
+                document.querySelectorAll('#economy-chat-event-excluded-list [data-channel-id]'),
+            ).map(el => el.dataset.channelId),
             'economy.announcementChannelId': document.getElementById('economy-announcement-channel').value || null,
             // Gifting limits. `safeInt` keeps a blank or unparseable box on the
             // schema default rather than on 0, which here would mean "no limit"

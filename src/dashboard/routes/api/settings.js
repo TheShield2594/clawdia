@@ -602,6 +602,49 @@ function validatePublicPageUpdate(updates) {
     return null;
 }
 
+// Ambient chat-event controls (src/services/chatEventService.js). The schema
+// enforces the frequency enum on save, but a bad id in the excluded list would
+// save happily and simply never match — so the shapes are checked here, where
+// the form can show the message. The events channel ends in `ChannelId`, so the
+// cross-guild check below covers it as it does every other posting target.
+const CHAT_EVENT_FREQUENCIES = new Set(['low', 'normal', 'high']);
+const CHAT_EVENT_BOOLEANS = new Set([
+    'chatEventsEnabled', 'chatEventAirdropsEnabled', 'chatEventCratesEnabled', 'chatEventTriviaEnabled',
+]);
+const MAX_CHAT_EVENT_EXCLUDED = 100;
+
+function validateChatEventUpdate(updates) {
+    // A whole `economy` object carries the same fields as the dotted keys do.
+    const fields = {};
+    for (const [key, value] of Object.entries(updates)) {
+        if (key === 'economy' && value && typeof value === 'object') Object.assign(fields, value);
+        else if (key.startsWith('economy.') && key.split('.').length === 2) fields[key.slice('economy.'.length)] = value;
+    }
+    for (const [field, value] of Object.entries(fields)) {
+        if (CHAT_EVENT_BOOLEANS.has(field) && typeof value !== 'boolean') {
+            return `economy.${field} must be true or false`;
+        }
+        if (field === 'chatEventFrequency' && !CHAT_EVENT_FREQUENCIES.has(value)) {
+            return `economy.chatEventFrequency must be one of: ${[...CHAT_EVENT_FREQUENCIES].join(', ')}`;
+        }
+        if (field === 'chatEventChannelId') {
+            const err = validateSnowflakeOrNull(value, 'economy.chatEventChannelId');
+            if (err) return err;
+        }
+        if (field === 'chatEventExcludedChannelIds') {
+            if (!Array.isArray(value) || value.length > MAX_CHAT_EVENT_EXCLUDED) {
+                return `economy.chatEventExcludedChannelIds must be an array of at most ${MAX_CHAT_EVENT_EXCLUDED} channel ids`;
+            }
+            for (const id of value) {
+                if (typeof id !== 'string' || !/^\d{17,20}$/.test(id)) {
+                    return 'economy.chatEventExcludedChannelIds entries must be Discord channel ids';
+                }
+            }
+        }
+    }
+    return null;
+}
+
 function validateHeistUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('heist.') && key !== 'heist') continue;
@@ -719,6 +762,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const heistError = validateHeistUpdate(updates);
     if (heistError) return res.status(400).json({ error: heistError });
+
+    const chatEventError = validateChatEventUpdate(updates);
+    if (chatEventError) return res.status(400).json({ error: chatEventError });
 
     const aiError = validateAiUpdate(updates);
     if (aiError) return res.status(400).json({ error: aiError });
@@ -886,5 +932,6 @@ Object.assign(module.exports, {
     validateDynamicPricingUpdate,
     validateAiUpdate,
     validateHeistUpdate,
+    validateChatEventUpdate,
     validatePublicPageUpdate,
 });

@@ -2,12 +2,18 @@
  * Ambient chat events — the bot occasionally interrupts an active channel with
  * a claimable opportunity: a coin drop, a supply crate, or flash trivia.
  *
- * Pacing is per guild: an event can fire only after MIN_MESSAGES_BETWEEN
- * qualifying messages AND COOLDOWN_MS since the last event, and then only with
- * EVENT_CHANCE probability per message — so active servers see a few events
- * per hour and quiet ones aren't spammed. An event is only spent once the bot
- * has confirmed it can actually post in the channel; a channel it cannot speak
- * in does not burn the guild's cooldown on a drop nobody sees.
+ * Pacing is per guild: an event can fire only after a preset number of
+ * qualifying messages AND a cooldown since the last event, and then only with a
+ * small probability per message — so active servers see a few events per hour
+ * and quiet ones aren't spammed. The preset is the guild's
+ * `economy.chatEventFrequency` (FREQUENCY_PRESETS below). An event is only
+ * spent once the bot has confirmed it can actually post in the target channel;
+ * a channel it cannot speak in does not burn the guild's cooldown on a drop
+ * nobody sees.
+ *
+ * Admins steer it from the dashboard's Economy → Games tab: the master switch,
+ * the frequency, an optional events channel every event posts in, channels
+ * whose chat never counts (and where nothing lands), and a switch per kind.
  *
  * Claims are first-come-first-served. A per-event `claimed` flag settles
  * button races (single process; collector callbacks run sequentially). The
@@ -36,10 +42,22 @@ const { delay } = require('../utils/delay');
 const { getQuestion } = require('./triviaQuestionService');
 const COLORS = require('../utils/embedColors');
 
-const EVENT_CHANCE         = 0.04;
-const MIN_MESSAGES_BETWEEN = 20;
-const COOLDOWN_MS          = 10 * 60 * 1000;
+// How often events fire, per guild. `normal` is the pacing the feature has
+// always had; the other two halve and roughly double it.
+const FREQUENCY_PRESETS = Object.freeze({
+    low:    Object.freeze({ minMessages: 40, cooldownMs: 20 * 60 * 1000, chance: 0.03 }),
+    normal: Object.freeze({ minMessages: 20, cooldownMs: 10 * 60 * 1000, chance: 0.04 }),
+    high:   Object.freeze({ minMessages: 10, cooldownMs:  5 * 60 * 1000, chance: 0.06 }),
+});
+const MIN_MESSAGES_BETWEEN = FREQUENCY_PRESETS.normal.minMessages;
 const CLAIM_WINDOW_MS      = 60_000;
+
+// Which kind fires, by weight, among the kinds the guild has left on.
+const EVENT_KINDS = [
+    { kind: 'airdrop', setting: 'chatEventAirdropsEnabled', weight: 45 },
+    { kind: 'crate',   setting: 'chatEventCratesEnabled',   weight: 30 },
+    { kind: 'trivia',  setting: 'chatEventTriviaEnabled',   weight: 25 },
+];
 
 const AIRDROP_MIN = 500;
 const AIRDROP_MAX = 2_000;
@@ -194,15 +212,61 @@ function finish(i, sent, payload) {
     return i.editReply(payload).catch(() => sent.edit(payload)).catch(() => {});
 }
 
+/** The pacing preset for a guild, falling back to `normal` for anything unknown. */
+function frequencyFor(economy) {
+    return FREQUENCY_PRESETS[economy?.chatEventFrequency] ?? FREQUENCY_PRESETS.normal;
+}
+
+/** The event kinds this guild has switched on. Unset means on. */
+function enabledKinds(economy) {
+    return EVENT_KINDS.filter(k => economy?.[k.setting] !== false);
+}
+
+/**
+ * Whether `channel` is one the guild excluded. A thread is judged by its
+ * parent, so excluding a forum or a channel covers the threads under it.
+ */
+function isExcluded(channel, economy) {
+    const excluded = economy?.chatEventExcludedChannelIds;
+    if (!Array.isArray(excluded) || excluded.length === 0 || !channel) return false;
+    return excluded.includes(channel.id) || (channel.parentId != null && excluded.includes(channel.parentId));
+}
+
+/**
+ * Where an event earned by chat in `channel` should land: the guild's events
+ * channel when it has one, otherwise the channel itself. Null when the
+ * configured events channel is gone, is not a text channel, or is excluded —
+ * an admin who picked a channel meant "only there", so the event waits rather
+ * than landing somewhere they did not choose.
+ */
+function eventTarget(message, economy) {
+    const id = economy?.chatEventChannelId;
+    if (!id) return message.channel;
+    const channel = message.guild.channels?.cache?.get(id) ?? null;
+    if (!channel?.isTextBased?.() || isExcluded(channel, economy)) return null;
+    return channel;
+}
+
+const SPAWNERS = {
+    airdrop: (...args) => spawnAirdrop(...args),
+    crate:   (...args) => spawnCrate(...args),
+    trivia:  (...args) => spawnTrivia(...args),
+};
+
 /**
  * Called from messageCreate for every non-bot guild message. Cheap unless an
  * event actually fires. Never throws.
  */
 async function maybeTriggerChatEvent(message, guildSettings) {
     try {
-        if (guildSettings?.economy?.enabled === false) return;
-        if (guildSettings?.economy?.chatEventsEnabled === false) return;
+        const economy = guildSettings?.economy;
+        if (economy?.enabled === false) return;
+        if (economy?.chatEventsEnabled === false) return;
         if (!message.guild || !message.channel?.isTextBased?.()) return;
+        // Chat in an excluded channel doesn't count toward anything.
+        if (isExcluded(message.channel, economy)) return;
+        const kinds = enabledKinds(economy);
+        if (kinds.length === 0) return;
 
         const guildId = message.guild.id;
         let state = guildState.get(guildId);
@@ -214,22 +278,25 @@ async function maybeTriggerChatEvent(message, guildSettings) {
             guildState.set(guildId, state);
         }
 
+        const pace = frequencyFor(economy);
         state.messagesSince += 1;
-        if (state.messagesSince < MIN_MESSAGES_BETWEEN) return;
-        if (Date.now() - state.lastEventAt < COOLDOWN_MS) return;
-        if (Math.random() >= EVENT_CHANCE) return;
+        if (state.messagesSince < pace.minMessages) return;
+        if (Date.now() - state.lastEventAt < pace.cooldownMs) return;
+        if (Math.random() >= pace.chance) return;
         // Checked last so the cheap counters still short-circuit the common
         // case, and before the cooldown is spent so a channel the bot cannot
         // speak in does not cost the guild its next event.
-        if (!botCanPost(message.channel, message.guild)) return;
+        const channel = eventTarget(message, economy);
+        if (!channel || !botCanPost(channel, message.guild)) return;
 
         state.lastEventAt   = Date.now();
         state.messagesSince = 0;
 
-        const roll = Math.random();
-        if (roll < 0.45)      await spawnAirdrop(message, guildSettings);
-        else if (roll < 0.75) await spawnCrate(message, guildSettings);
-        else                  await spawnTrivia(message, guildSettings);
+        // The spawners read the id (for button ids), the guild and the channel
+        // to post in — which is the events channel when one is set.
+        const target = { id: message.id, guild: message.guild, channel };
+        const { kind } = weightedPick(kinds);
+        await SPAWNERS[kind](target, guildSettings);
     } catch (err) {
         console.error('[chatEvent] error:', err);
     }
@@ -582,7 +649,7 @@ async function spawnTrivia(message, guildSettings) {
 module.exports = {
     maybeTriggerChatEvent,
     __test__: {
-        guildState, MAX_TRACKED_GUILDS, MIN_MESSAGES_BETWEEN, CRATE_ITEMS,
-        spawnAirdrop, spawnCrate, spawnTrivia, botCanPost,
+        guildState, MAX_TRACKED_GUILDS, MIN_MESSAGES_BETWEEN, CRATE_ITEMS, FREQUENCY_PRESETS,
+        spawnAirdrop, spawnCrate, spawnTrivia, botCanPost, isExcluded, eventTarget, enabledKinds,
     },
 };
