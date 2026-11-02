@@ -1,0 +1,300 @@
+'use strict';
+
+// Ambient chat events — src/services/chatEventService.js. The claim paths used
+// to award with a bare `$inc`, skip the economy freeze (these are collector
+// buttons, so the command gate never sees them), ignore the Coin Booster, and
+// write crate ledger rows with a fabricated zero balance. These hold the fixes.
+
+const { EventEmitter } = require('events');
+const { PermissionFlagsBits } = require('discord.js');
+
+jest.mock('../src/models/User', () => ({ findOne: jest.fn(), updateOne: jest.fn() }));
+jest.mock('../src/utils/creditOrOwe', () => ({ creditCoinsOrOwe: jest.fn(), grantItemsOrOwe: jest.fn() }));
+jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
+jest.mock('../src/utils/itemImageHelper', () => ({ attachItemThumbnail: jest.fn(async () => []) }));
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
+jest.mock('../src/services/triviaQuestionService', () => ({ getQuestion: jest.fn() }));
+
+const User = require('../src/models/User');
+const { creditCoinsOrOwe, grantItemsOrOwe } = require('../src/utils/creditOrOwe');
+const { logTransaction } = require('../src/utils/logTransaction');
+const { getQuestion } = require('../src/services/triviaQuestionService');
+const COLORS = require('../src/utils/embedColors');
+const chatEventService = require('../src/services/chatEventService');
+
+const { spawnAirdrop, spawnCrate, spawnTrivia, guildState, MIN_MESSAGES_BETWEEN } = chatEventService.__test__;
+
+function makeCollector() {
+    const collector = new EventEmitter();
+    collector.stop = jest.fn(reason => collector.emit('end', [], reason));
+    return collector;
+}
+
+function makeMessage({ canPost = true } = {}) {
+    const collector = makeCollector();
+    const sent = {
+        id: 'drop1',
+        edit: jest.fn(async () => {}),
+        createMessageComponentCollector: jest.fn(() => collector),
+    };
+    const perms = { has: jest.fn(() => canPost) };
+    const message = {
+        id: 'msg1',
+        guild: { id: 'g1', members: { me: { id: 'bot' } } },
+        channel: {
+            isTextBased: () => true,
+            isThread: () => false,
+            permissionsFor: jest.fn(() => perms),
+            send: jest.fn(async () => sent),
+        },
+    };
+    return { message, sent, collector, perms };
+}
+
+function click(customId, userId = 'u1') {
+    return {
+        customId,
+        user: { id: userId, bot: false, username: `user-${userId}` },
+        member: { displayName: `Player ${userId}` },
+        reply: jest.fn(async () => {}),
+        update: jest.fn(async () => {}),
+        deferUpdate: jest.fn(async () => {}),
+        editReply: jest.fn(async () => {}),
+    };
+}
+
+// The collector's 'collect' handlers are async and not awaited by the emitter.
+async function collect(collector, interaction) {
+    const [handler] = collector.listeners('collect');
+    await handler(interaction);
+}
+
+const lean = value => ({ lean: async () => value });
+
+beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(Math, 'random').mockReturnValue(0); // airdrop base = AIRDROP_MIN (500); crate = Lucky Charm
+    User.findOne.mockReturnValue(lean({ balance: 4_000, activeEffects: [] }));
+    creditCoinsOrOwe.mockResolvedValue({ credited: true, owed: false, doc: { balance: 4_500 } });
+    grantItemsOrOwe.mockResolvedValue({ granted: true, owed: false, doc: { balance: 4_000 } });
+});
+
+afterEach(() => jest.restoreAllMocks());
+
+describe('coin drop', () => {
+    test('pays through the keyed credit and logs the real balance', async () => {
+        const { message, sent, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+
+        const i = click('chatev_air_msg1');
+        await collect(collector, i);
+
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' }, 500,
+            expect.objectContaining({ payoutKey: 'chatevent:airdrop:drop1' }),
+        );
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ amount: 500, balance: 4_500 }));
+        expect(collector.stop).toHaveBeenCalledWith('claimed');
+        expect(i.deferUpdate).toHaveBeenCalled();
+        const card = i.editReply.mock.calls[0][0].embeds[0].toJSON();
+        expect(card.color).toBe(parseInt(COLORS.SUCCESS.slice(1), 16));
+        expect(card.description).toContain('+500');
+        // A claimed drop is not overwritten with the "drifted away" card.
+        expect(sent.edit).not.toHaveBeenCalled();
+    });
+
+    test('a second click after the claim is told it was too slow', async () => {
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+        await collect(collector, click('chatev_air_msg1', 'u1'));
+
+        const late = click('chatev_air_msg1', 'u2');
+        await collect(collector, late);
+        expect(late.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Too slow') }));
+        expect(creditCoinsOrOwe).toHaveBeenCalledTimes(1);
+    });
+
+    test('a frozen member is refused and the drop stays up for someone else', async () => {
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+
+        User.findOne.mockReturnValueOnce(lean({ balance: 10, economyFrozen: true, activeEffects: [] }));
+        const frozen = click('chatev_air_msg1', 'frozen');
+        await collect(collector, frozen);
+        expect(frozen.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('frozen') }));
+        expect(creditCoinsOrOwe).not.toHaveBeenCalled();
+        expect(collector.stop).not.toHaveBeenCalled();
+
+        await collect(collector, click('chatev_air_msg1', 'u2'));
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+            { userId: 'u2', guildId: 'g1' }, 500, expect.anything(),
+        );
+    });
+
+    test('an active Coin Booster doubles the prize', async () => {
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+
+        User.findOne.mockReturnValueOnce(lean({
+            balance: 0,
+            activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 60_000) }],
+        }));
+        const i = click('chatev_air_msg1');
+        await collect(collector, i);
+
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(expect.anything(), 1_000, expect.anything());
+        expect(i.editReply.mock.calls[0][0].embeds[0].toJSON().description).toContain('Coin Booster');
+    });
+
+    test('a credit that will not land is owed — announced as such, not logged as paid', async () => {
+        creditCoinsOrOwe.mockResolvedValueOnce({ credited: false, owed: true, doc: null });
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+
+        const i = click('chatev_air_msg1');
+        await collect(collector, i);
+
+        expect(logTransaction).not.toHaveBeenCalled();
+        expect(collector.stop).toHaveBeenCalledWith('claimed');
+        const card = i.editReply.mock.calls[0][0].embeds[0].toJSON();
+        expect(card.color).toBe(parseInt(COLORS.WARN.slice(1), 16));
+        expect(card.description).toContain('recorded');
+    });
+
+    test('a claimant with no document gets one before the keyed credit', async () => {
+        User.findOne
+            .mockReturnValueOnce(lean(null))
+            .mockReturnValueOnce(lean({ balance: 0, activeEffects: [] }));
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+        await collect(collector, click('chatev_air_msg1', 'newbie'));
+
+        expect(User.updateOne).toHaveBeenCalledWith(
+            { userId: 'newbie', guildId: 'g1' },
+            { $setOnInsert: { userId: 'newbie', guildId: 'g1' } },
+            { upsert: true },
+        );
+        expect(creditCoinsOrOwe).toHaveBeenCalled();
+    });
+
+    test('a failed claimant read releases the drop', async () => {
+        User.findOne.mockReturnValueOnce({ lean: async () => { throw new Error('db down'); } });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+
+        const first = click('chatev_air_msg1', 'u1');
+        await collect(collector, first);
+        expect(first.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('try again') }));
+
+        await collect(collector, click('chatev_air_msg1', 'u2'));
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith({ userId: 'u2', guildId: 'g1' }, 500, expect.anything());
+    });
+
+    test('an unclaimed drop expires into the neutral card', async () => {
+        const { message, sent, collector } = makeMessage();
+        await spawnAirdrop(message, {});
+        collector.emit('end', [], 'time');
+        expect(sent.edit.mock.calls[0][0].embeds[0].toJSON().title).toContain('drifted away');
+    });
+});
+
+describe('supply crate', () => {
+    test('grants through the keyed path and logs the wallet balance, not zero', async () => {
+        const { message, collector } = makeMessage();
+        await spawnCrate(message, {});
+
+        const i = click('chatev_crate_msg1');
+        await collect(collector, i);
+
+        expect(grantItemsOrOwe).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' }, 'lucky_charm', 1,
+            expect.objectContaining({ payoutKey: 'chatevent:crate:drop1', upsert: true }),
+        );
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ amount: 0, balance: 4_000 }));
+        // The "cracking it open" beat, then the reveal.
+        expect(i.update.mock.calls[0][0].embeds[0].toJSON().title).toContain('Cracking');
+        const reveal = i.editReply.mock.calls[0][0].embeds[0].toJSON();
+        expect(reveal.description).toContain('Lucky Charm');
+        expect(reveal.fields.map(f => f.name)).toEqual(expect.arrayContaining(['Rarity', 'Shop value']));
+    });
+
+    test('a frozen member cannot open it', async () => {
+        User.findOne.mockReturnValueOnce(lean({ economyFrozen: true }));
+        const { message, collector } = makeMessage();
+        await spawnCrate(message, {});
+        const i = click('chatev_crate_msg1');
+        await collect(collector, i);
+        expect(grantItemsOrOwe).not.toHaveBeenCalled();
+        expect(i.update).not.toHaveBeenCalled();
+    });
+});
+
+describe('flash trivia', () => {
+    beforeEach(() => {
+        getQuestion.mockResolvedValue({
+            question: 'Capital of France?', category: 'Geography',
+            correct_answer: 'Paris', incorrect_answers: ['Rome', 'Madrid', 'Berlin'],
+        });
+    });
+
+    test('a wrong guess spends that member\'s guess; the right one pays', async () => {
+        const { message, collector } = makeMessage();
+        await spawnTrivia(message, {});
+        const row = message.channel.send.mock.calls[0][0].components[0].toJSON();
+        const idOf = label => row.components.find(b => b.label === label).custom_id;
+
+        const wrong = click(idOf('Rome'), 'u1');
+        await collect(collector, wrong);
+        expect(wrong.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Not **Rome**') }));
+
+        const again = click(idOf('Paris'), 'u1');
+        await collect(collector, again);
+        expect(again.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('already used') }));
+
+        const right = click(idOf('Paris'), 'u2');
+        await collect(collector, right);
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+            { userId: 'u2', guildId: 'g1' }, 1_000,
+            expect.objectContaining({ payoutKey: 'chatevent:trivia:drop1' }),
+        );
+        const payload = right.editReply.mock.calls[0][0];
+        expect(payload.embeds[0].toJSON().description).toContain('1 wrong guess');
+        const buttons = payload.components[0].toJSON().components;
+        expect(buttons.every(b => b.disabled)).toBe(true);
+        expect(buttons.find(b => b.label === 'Paris').emoji.name).toBe('✅');
+    });
+});
+
+describe('spawning', () => {
+    beforeEach(() => guildState.clear());
+
+    test('a channel the bot cannot post in does not spend the cooldown', async () => {
+        const { message } = makeMessage({ canPost: false });
+        for (let n = 0; n < MIN_MESSAGES_BETWEEN; n++) {
+            await chatEventService.maybeTriggerChatEvent(message, {});
+        }
+        expect(message.channel.send).not.toHaveBeenCalled();
+        const state = guildState.get('g1');
+        expect(state.lastEventAt).toBe(0);
+        expect(state.messagesSince).toBe(MIN_MESSAGES_BETWEEN);
+    });
+
+    test('checks the thread send permission inside a thread', async () => {
+        const { message, perms } = makeMessage({ canPost: false });
+        message.channel.isThread = () => true;
+        for (let n = 0; n < MIN_MESSAGES_BETWEEN; n++) {
+            await chatEventService.maybeTriggerChatEvent(message, {});
+        }
+        expect(perms.has).toHaveBeenCalledWith(expect.arrayContaining([PermissionFlagsBits.SendMessagesInThreads]));
+    });
+
+    test('fires once the bot can post', async () => {
+        const { message } = makeMessage();
+        for (let n = 0; n < MIN_MESSAGES_BETWEEN; n++) {
+            await chatEventService.maybeTriggerChatEvent(message, {});
+        }
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(guildState.get('g1').messagesSince).toBe(0);
+    });
+});

@@ -291,16 +291,20 @@ describe('the sweep is actually sweeping', () => {
         // (The floor was 13; #873 pass 7 moved `/season`'s tier grant to
         // `grantItemsOrOwe`, and #873 pass 8 moved the four save-based event
         // activities' bonus-item grants to it too, and #873 pass 14 moved
-        // `/shop buy`'s grant, leaving 7 bare `grantInventoryItem` call sites
-        // across 6 files.)
-        expect(GRANTS.length).toBeGreaterThanOrEqual(7);
-        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(6);
+        // `/shop buy`'s grant, and the supply-crate claim in chatEventService
+        // moved to it as well, leaving 6 bare `grantInventoryItem` call sites
+        // across 5 files.)
+        expect(GRANTS.length).toBeGreaterThanOrEqual(6);
+        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(5);
     });
 
-    it('covers services and commands alike, not just one folder', () => {
+    it('covers more than one folder', () => {
+        // Services used to hold one of these too — the supply crate — until it
+        // moved to the keyed `grantItemsOrOwe`, so the bare sites left live in
+        // commands and the shared utils.
         const areas = new Set(GRANTS.map(c => c.file.split(path.sep)[0]));
         expect(areas).toContain('commands');
-        expect(areas).toContain('services');
+        expect(areas.size).toBeGreaterThanOrEqual(2);
     });
 
     it('sees every use, because nothing imports the helpers under another name', () => {
