@@ -38,7 +38,11 @@ function makeMessage({ canPost = true } = {}) {
         createMessageComponentCollector: jest.fn(() => collector),
     };
     const perms = { has: jest.fn(() => canPost) };
+    // A fresh author on every read, so loops of chat count as many people
+    // talking; the fairness tests pin a single author instead.
+    let authorSeq = 0;
     const message = {
+        get author() { return { id: `author${authorSeq++}` }; },
         id: 'msg1',
         guild: { id: 'g1', members: { me: { id: 'bot' } } },
         channel: {
@@ -100,7 +104,8 @@ describe('coin drop', () => {
         expect(card.color).toBe(parseInt(COLORS.SUCCESS.slice(1), 16));
         expect(card.description).toContain('+500');
         // A claimed drop is not overwritten with the "drifted away" card.
-        expect(sent.edit).not.toHaveBeenCalled();
+        const titles = sent.edit.mock.calls.map(([p]) => p.embeds[0].toJSON().title);
+        expect(titles.some(t => t.includes('drifted'))).toBe(false);
     });
 
     test('a second click after the claim is told it was too slow', async () => {
@@ -195,7 +200,7 @@ describe('coin drop', () => {
         const { message, sent, collector } = makeMessage();
         await spawnAirdrop(message, {});
         collector.emit('end', [], 'time');
-        expect(sent.edit.mock.calls[0][0].embeds[0].toJSON().title).toContain('drifted away');
+        expect(sent.edit.mock.calls.at(-1)[0].embeds[0].toJSON().title).toContain('drifted away');
     });
 });
 
@@ -383,5 +388,155 @@ describe('admin controls', () => {
             economy: { chatEventAirdropsEnabled: false, chatEventCratesEnabled: false, chatEventTriviaEnabled: false },
         }, 50);
         expect(message.channel.send).not.toHaveBeenCalled();
+    });
+});
+
+describe('fairness', () => {
+    const { FREQUENCY_PRESETS, AUTHOR_COUNT_GAP_MS } = chatEventService.__test__;
+    beforeEach(() => guildState.clear());
+
+    const pinAuthor = (message, id) => Object.defineProperty(message, 'author', { value: { id }, configurable: true });
+
+    test('every event posts locked, then unlocks', async () => {
+        const { message, sent } = makeMessage();
+        await spawnAirdrop(message, {});
+        const posted = message.channel.send.mock.calls[0][0];
+        expect(posted.components[0].toJSON().components[0].disabled).toBe(true);
+        expect(posted.embeds[0].toJSON().description).toContain('Unlocks in a moment');
+
+        const live = sent.edit.mock.calls[0][0];
+        expect(live.components[0].toJSON().components[0].disabled).toBe(false);
+        expect(live.embeds[0].toJSON().description).toMatch(/<t:\d+:R>/);
+    });
+
+    test('one person spamming never earns an event', async () => {
+        const { message } = makeMessage();
+        pinAuthor(message, 'spammer');
+        for (let n = 0; n < 200; n++) await chatEventService.maybeTriggerChatEvent(message, {});
+        expect(message.channel.send).not.toHaveBeenCalled();
+        // A burst inside the gap counts once.
+        expect(guildState.get('g1').messagesSince).toBe(1);
+    });
+
+    test('the same author counts again once the gap has passed', async () => {
+        const { message } = makeMessage();
+        pinAuthor(message, 'steady');
+        const now = jest.spyOn(Date, 'now');
+        let t = 1_000_000;
+        now.mockImplementation(() => t);
+        for (let n = 0; n < 5; n++) {
+            await chatEventService.maybeTriggerChatEvent(message, {});
+            t += AUTHOR_COUNT_GAP_MS;
+        }
+        expect(guildState.get('g1').messagesSince).toBe(5);
+    });
+
+    test('an event needs enough different people', async () => {
+        const { message } = makeMessage();
+        const pace = FREQUENCY_PRESETS.normal;
+        const now = jest.spyOn(Date, 'now');
+        let t = 1_000_000;
+        now.mockImplementation(() => t);
+        // Two people trading messages well past the message bar.
+        for (let n = 0; n < pace.minMessages * 2; n++) {
+            pinAuthor(message, n % 2 ? 'alice' : 'bob');
+            await chatEventService.maybeTriggerChatEvent(message, {});
+            t += AUTHOR_COUNT_GAP_MS;
+        }
+        expect(message.channel.send).not.toHaveBeenCalled();
+
+        pinAuthor(message, 'carol');
+        await chatEventService.maybeTriggerChatEvent(message, {});
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(guildState.get('g1').authors.size).toBe(0);
+    });
+});
+
+describe('drop variants', () => {
+    const { rollDropVariant, spawnSplitDrop, SPLIT_SHARES, GOLDEN_MULTIPLIER } = chatEventService.__test__;
+
+    test('the roll is mostly standard, sometimes split, rarely golden', () => {
+        Math.random.mockReturnValue(0.5);
+        expect(rollDropVariant()).toBe('standard');
+        Math.random.mockReturnValue(0.85);
+        expect(rollDropVariant()).toBe('split');
+        Math.random.mockReturnValue(0.97);
+        expect(rollDropVariant()).toBe('golden');
+    });
+
+    test('a golden drop pays the multiplied amount and says so', async () => {
+        const { message, collector } = makeMessage();
+        await spawnAirdrop(message, {}, 'golden');
+        expect(message.channel.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('GOLDEN');
+
+        const i = click('chatev_air_msg1');
+        await collect(collector, i);
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(expect.anything(), 500 * GOLDEN_MULTIPLIER, expect.anything());
+        expect(i.editReply.mock.calls[0][0].embeds[0].toJSON().title).toContain('Golden');
+    });
+
+    test('a split drop pays one share to each of the first grabbers', async () => {
+        const { message, sent, collector } = makeMessage();
+        await spawnSplitDrop(message, {});
+        // Math.random 0 → the minimum pot, 1,500, so 500 a share.
+        for (let n = 1; n <= SPLIT_SHARES; n++) await collect(collector, click('chatev_split_msg1', `u${n}`));
+
+        expect(creditCoinsOrOwe).toHaveBeenCalledTimes(SPLIT_SHARES);
+        for (let n = 1; n <= SPLIT_SHARES; n++) {
+            expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+                { userId: `u${n}`, guildId: 'g1' }, 500,
+                expect.objectContaining({ payoutKey: 'chatevent:split:drop1' }),
+            );
+        }
+        expect(collector.stop).toHaveBeenCalledWith('claimed');
+        await Promise.resolve();
+        const last = sent.edit.mock.calls.at(-1)[0];
+        expect(last.embeds[0].toJSON().title).toContain('shared out');
+        expect(last.components).toEqual([]);
+
+        const late = click('chatev_split_msg1', 'u9');
+        await collect(collector, late);
+        expect(late.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('every share is taken') }));
+    });
+
+    test('nobody gets two shares', async () => {
+        const { message, collector } = makeMessage();
+        await spawnSplitDrop(message, {});
+        await collect(collector, click('chatev_split_msg1', 'u1'));
+        const again = click('chatev_split_msg1', 'u1');
+        await collect(collector, again);
+        expect(again.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('already grabbed') }));
+        expect(creditCoinsOrOwe).toHaveBeenCalledTimes(1);
+    });
+
+    test('a frozen member does not take a share from anyone', async () => {
+        const { message, collector } = makeMessage();
+        await spawnSplitDrop(message, {});
+        User.findOne.mockReturnValueOnce(lean({ economyFrozen: true }));
+        await collect(collector, click('chatev_split_msg1', 'frozen'));
+        for (let n = 1; n <= SPLIT_SHARES; n++) await collect(collector, click('chatev_split_msg1', `u${n}`));
+        expect(creditCoinsOrOwe).toHaveBeenCalledTimes(SPLIT_SHARES);
+        expect(creditCoinsOrOwe).not.toHaveBeenCalledWith(expect.objectContaining({ userId: 'frozen' }), expect.anything(), expect.anything());
+    });
+
+    test('shares left at the timeout drift away; the claimed ones stand', async () => {
+        const { message, sent, collector } = makeMessage();
+        await spawnSplitDrop(message, {});
+        await collect(collector, click('chatev_split_msg1', 'u1'));
+        collector.emit('end', [], 'time');
+        await new Promise(resolve => setImmediate(resolve));
+
+        const card = sent.edit.mock.calls.at(-1)[0].embeds[0].toJSON();
+        expect(card.title).toBe('🎁 Split drop over');
+        expect(card.description).toContain('Player u1');
+        expect(card.description).toContain(`${SPLIT_SHARES - 1} unclaimed shares drifted away`);
+    });
+
+    test('a split drop nobody grabs drifts away', async () => {
+        const { message, sent, collector } = makeMessage();
+        await spawnSplitDrop(message, {});
+        collector.emit('end', [], 'time');
+        await new Promise(resolve => setImmediate(resolve));
+        expect(sent.edit.mock.calls.at(-1)[0].embeds[0].toJSON().title).toContain('drifted away');
     });
 });

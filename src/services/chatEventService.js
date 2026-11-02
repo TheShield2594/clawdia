@@ -45,12 +45,28 @@ const COLORS = require('../utils/embedColors');
 // How often events fire, per guild. `normal` is the pacing the feature has
 // always had; the other two halve and roughly double it.
 const FREQUENCY_PRESETS = Object.freeze({
-    low:    Object.freeze({ minMessages: 40, cooldownMs: 20 * 60 * 1000, chance: 0.03 }),
-    normal: Object.freeze({ minMessages: 20, cooldownMs: 10 * 60 * 1000, chance: 0.04 }),
-    high:   Object.freeze({ minMessages: 10, cooldownMs:  5 * 60 * 1000, chance: 0.06 }),
+    low:    Object.freeze({ minMessages: 40, minAuthors: 4, cooldownMs: 20 * 60 * 1000, chance: 0.03 }),
+    normal: Object.freeze({ minMessages: 20, minAuthors: 3, cooldownMs: 10 * 60 * 1000, chance: 0.04 }),
+    high:   Object.freeze({ minMessages: 10, minAuthors: 2, cooldownMs:  5 * 60 * 1000, chance: 0.06 }),
 });
 const MIN_MESSAGES_BETWEEN = FREQUENCY_PRESETS.normal.minMessages;
 const CLAIM_WINDOW_MS      = 60_000;
+
+// Fairness. A drop used to appear directly under the message that triggered
+// it, live, so whoever happened to be typing saw it first — and one person
+// spamming both earned the trigger and won it. Three things even that out:
+//
+//   * an author's messages count once per AUTHOR_COUNT_GAP_MS, so a burst of
+//     one-word spam moves the counter no faster than steady chat;
+//   * an event needs chat from at least the preset's `minAuthors` different
+//     people since the last one, so one person cannot summon events alone;
+//   * every event posts with its buttons locked and unlocks ARM_MS later, so
+//     the whole channel gets a moment to notice it before anyone can click.
+const AUTHOR_COUNT_GAP_MS = 4_000;
+const ARM_MS              = 2_000;
+// Bounds the per-guild author map between events. Past it, new authors still
+// count toward the message total; the distinct-author bar is long since met.
+const MAX_TRACKED_AUTHORS = 500;
 
 // Which kind fires, by weight, among the kinds the guild has left on.
 const EVENT_KINDS = [
@@ -61,6 +77,24 @@ const EVENT_KINDS = [
 
 const AIRDROP_MIN = 500;
 const AIRDROP_MAX = 2_000;
+
+// Coin-drop variants, for variety. Rolled high so a plain drop stays the
+// common case: 80% standard, 15% split, 5% golden.
+//
+//   golden  the same drop at GOLDEN_MULTIPLIER the coins
+//   split   a bigger pot shared equally by the first SPLIT_SHARES grabbers,
+//           one share each — a drop more than one person walks away from
+const GOLDEN_CHANCE     = 0.05;
+const SPLIT_CHANCE      = 0.15;
+const GOLDEN_MULTIPLIER = 3;
+const SPLIT_SHARES      = 3;
+const SPLIT_POT_MIN     = 1_500;
+const SPLIT_POT_MAX     = 4_500;
+
+// Each variant's own colour — feature identities, not outcome roles (see
+// src/utils/embedColors.js). The golden drop wears PRIZE gold.
+const DROP_COLOR  = '#4fc3f7';
+const SPLIT_COLOR = '#1abc9c';
 const TRIVIA_REWARD = 1_000;
 
 // How long the crate sits on "cracking it open…" before the reveal. Long
@@ -85,7 +119,7 @@ const FROZEN_CLAIM_NOTICE =
     + 'A server admin can lift it from the dashboard.';
 const CLAIM_ERROR_NOTICE = '⚠️ Something went wrong reaching your account — try again!';
 
-const guildState = new Map(); // guildId -> { lastEventAt, messagesSince }
+const guildState = new Map(); // guildId -> { lastEventAt, messagesSince, authors: Map(userId -> lastCountedAt) }
 
 // One entry per guild the process has ever seen a message in, with nothing to
 // remove it — the bot leaving a guild does not, and there is no TTL because a
@@ -141,8 +175,39 @@ function botCanAttach(channel, guild) {
 }
 
 /** Discord relative timestamp for the moment the claim window closes. */
-function expiryStamp(spawnedAt) {
-    return `<t:${Math.floor((spawnedAt + CLAIM_WINDOW_MS) / 1000)}:R>`;
+function expiryStamp(armedAt) {
+    return `<t:${Math.floor((armedAt + CLAIM_WINDOW_MS) / 1000)}:R>`;
+}
+
+/**
+ * Posts an event with its buttons locked, and unlocks them ARM_MS later.
+ *
+ * `render(armedAt)` builds the message: `armedAt` is null for the locked
+ * version and the unlock time for the live one, which is also when the claim
+ * window starts — so the countdown and the reaction times are measured from
+ * the moment anyone could click, not from when the post appeared.
+ *
+ * The collector starts with the post (a locked button cannot be clicked) and
+ * runs for the arming beat plus the claim window.
+ */
+async function postArmed(channel, render, filter) {
+    const sent = await channel.send(render(null));
+    const collector = sent.createMessageComponentCollector({ filter, time: ARM_MS + CLAIM_WINDOW_MS });
+    const timing = { armedAt: null };
+    await delay(ARM_MS);
+    timing.armedAt = Date.now();
+    await sent.edit(render(timing.armedAt)).catch(() => {});
+    return { sent, collector, timing };
+}
+
+/** How long after the unlock a click came, for the winner card. */
+function reactionTime(timing, clickedAt) {
+    return seconds(clickedAt - (timing.armedAt ?? clickedAt));
+}
+
+/** The closing line of a live or locked event. */
+function countdownLine(armedAt, verb = 'Gone') {
+    return armedAt == null ? '🔒 Unlocks in a moment…' : `⏳ ${verb} ${expiryStamp(armedAt)}`;
 }
 
 function seconds(ms) {
@@ -274,13 +339,23 @@ async function maybeTriggerChatEvent(message, guildSettings) {
             if (guildState.size >= MAX_TRACKED_GUILDS) {
                 guildState.delete(guildState.keys().next().value);
             }
-            state = { lastEventAt: 0, messagesSince: 0 };
+            state = { lastEventAt: 0, messagesSince: 0, authors: new Map() };
             guildState.set(guildId, state);
+        }
+
+        // One author's burst counts once per gap; see AUTHOR_COUNT_GAP_MS.
+        const now = Date.now();
+        const authorId = message.author?.id ?? null;
+        if (authorId) {
+            const last = state.authors.get(authorId);
+            if (last != null && now - last < AUTHOR_COUNT_GAP_MS) return;
+            if (last != null || state.authors.size < MAX_TRACKED_AUTHORS) state.authors.set(authorId, now);
         }
 
         const pace = frequencyFor(economy);
         state.messagesSince += 1;
         if (state.messagesSince < pace.minMessages) return;
+        if (state.authors.size < pace.minAuthors) return;
         if (Date.now() - state.lastEventAt < pace.cooldownMs) return;
         if (Math.random() >= pace.chance) return;
         // Checked last so the cheap counters still short-circuit the common
@@ -291,6 +366,7 @@ async function maybeTriggerChatEvent(message, guildSettings) {
 
         state.lastEventAt   = Date.now();
         state.messagesSince = 0;
+        state.authors.clear();
 
         // The spawners read the id (for button ids), the guild and the channel
         // to post in — which is the events channel when one is set.
@@ -304,32 +380,45 @@ async function maybeTriggerChatEvent(message, guildSettings) {
 
 // ── Coin drop ─────────────────────────────────────────────────────────────────
 
-async function spawnAirdrop(message, guildSettings) {
-    const currency  = guildSettings?.economy?.currency ?? '💰';
-    const base      = randInt(AIRDROP_MIN, AIRDROP_MAX);
-    const claimId   = `chatev_air_${message.id}`;
-    const spawnedAt = Date.now();
+/** standard | golden | split — rolled high so 0 is the plain drop. */
+function rollDropVariant() {
+    const roll = Math.random();
+    if (roll >= 1 - GOLDEN_CHANCE) return 'golden';
+    if (roll >= 1 - GOLDEN_CHANCE - SPLIT_CHANCE) return 'split';
+    return 'standard';
+}
 
-    const embed = new EmbedBuilder()
-        .setColor(COLORS.PRIZE)
-        .setTitle('🪂 Coin drop incoming!')
-        .setDescription(
-            `A parachute of **${currency}${base.toLocaleString()}** is drifting down.\n`
-            + 'First to grab it keeps it!\n\n'
-            + `⏳ Gone ${expiryStamp(spawnedAt)}`,
-        );
+async function spawnAirdrop(message, guildSettings, variant = rollDropVariant()) {
+    if (variant === 'split') return spawnSplitDrop(message, guildSettings);
 
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(claimId).setLabel('Grab it!').setEmoji('🪂').setStyle(ButtonStyle.Success),
-    );
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const golden   = variant === 'golden';
+    const base     = randInt(AIRDROP_MIN, AIRDROP_MAX) * (golden ? GOLDEN_MULTIPLIER : 1);
+    const claimId  = `chatev_air_${message.id}`;
+    const title    = golden ? '🌟 A GOLDEN coin drop!' : '🪂 Coin drop incoming!';
 
-    const sent = await message.channel.send({ embeds: [embed], components: [row] });
-    let claimed = false;
-
-    const collector = sent.createMessageComponentCollector({
-        filter: i => i.customId === claimId && !i.user.bot,
-        time:   CLAIM_WINDOW_MS,
+    const render = armedAt => ({
+        embeds: [new EmbedBuilder()
+            .setColor(golden ? COLORS.PRIZE : DROP_COLOR)
+            .setTitle(title)
+            .setDescription(
+                (golden
+                    ? `A shimmering parachute of **${currency}${base.toLocaleString()}** is drifting down — `
+                      + `${GOLDEN_MULTIPLIER}× the usual haul!\n`
+                    : `A parachute of **${currency}${base.toLocaleString()}** is drifting down.\n`)
+                + 'First to grab it keeps it!\n\n'
+                + countdownLine(armedAt),
+            )],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(claimId).setLabel('Grab it!').setEmoji(golden ? '🌟' : '🪂')
+                .setStyle(ButtonStyle.Success).setDisabled(armedAt == null),
+        )],
     });
+
+    const { sent, collector, timing } = await postArmed(
+        message.channel, render, i => i.customId === claimId && !i.user.bot,
+    );
+    let claimed = false;
 
     collector.on('collect', async i => {
         if (claimed) {
@@ -359,18 +448,19 @@ async function spawnAirdrop(message, guildSettings) {
         await i.deferUpdate().catch(() => {});
 
         const prize = await payCoinPrize({
-            filter, base, snapshot, kind: 'airdrop', eventMessageId: sent.id, note: 'Coin drop claim',
+            filter, base, snapshot, kind: 'airdrop', eventMessageId: sent.id,
+            note: golden ? 'Golden coin drop claim' : 'Coin drop claim',
         });
 
         const lines = [
-            `**${displayName(i)}** snatched it in **${seconds(clickedAt - spawnedAt)}**! 💨`,
+            `**${displayName(i)}** snatched it in **${reactionTime(timing, clickedAt)}**! 💨`,
             '',
             prize.credited ? coinPrizeLine(currency, base, prize) : OWED_LINE,
         ];
         await finish(i, sent, {
             embeds: [new EmbedBuilder()
-                .setColor(prize.credited ? COLORS.SUCCESS : COLORS.WARN)
-                .setTitle('🪂 Coin drop claimed!')
+                .setColor(prize.credited ? (golden ? COLORS.PRIZE : COLORS.SUCCESS) : COLORS.WARN)
+                .setTitle(golden ? '🌟 Golden coin drop claimed!' : '🪂 Coin drop claimed!')
                 .setDescription(lines.join('\n'))
                 .setFooter({ text: 'Keep chatting — more drops are on the way.' })],
             components: [],
@@ -382,12 +472,128 @@ async function spawnAirdrop(message, guildSettings) {
             sent.edit({
                 embeds: [new EmbedBuilder()
                     .setColor(COLORS.NEUTRAL)
-                    .setTitle('🪂 The coin drop drifted away…')
+                    .setTitle(golden ? '🌟 The golden drop drifted away…' : '🪂 The coin drop drifted away…')
                     .setDescription(`Nobody grabbed the **${currency}${base.toLocaleString()}** in time.`)
                     .setFooter({ text: 'Stay alert for the next one!' })],
                 components: [],
             }).catch(() => {});
         }
+    });
+}
+
+// ── Split drop (a coin-drop variant) ──────────────────────────────────────────
+
+/**
+ * A bigger pot, shared equally by the first SPLIT_SHARES members to grab it.
+ * Each share is its own keyed credit — the key names the drop and lives on
+ * each winner's document, so it guards each member's share separately.
+ *
+ * Every render reads the live state and goes through one chain, so two claims
+ * landing together cannot leave an older card on top of a newer one.
+ */
+async function spawnSplitDrop(message, guildSettings) {
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const pot      = randInt(SPLIT_POT_MIN, SPLIT_POT_MAX);
+    const share    = Math.floor(pot / SPLIT_SHARES);
+    const claimId  = `chatev_split_${message.id}`;
+
+    const winners  = [];          // { name, prize, time } in claim order
+    const inFlight = new Set();   // user ids whose claim is being paid
+    const done     = new Set();   // user ids already holding a share
+    let closed     = false;
+
+    const sharesLeft = () => SPLIT_SHARES - winners.length - inFlight.size;
+    const winnerLines = () => winners.map((w, n) =>
+        `${['🥇', '🥈', '🥉'][n] ?? '🎁'} **${w.name}** · ${w.time} · `
+        + (w.prize.credited ? coinPrizeLine(currency, share, w.prize) : '⏳ payout recorded, delivery pending'));
+
+    const render = armedAt => ({
+        embeds: [new EmbedBuilder()
+            .setColor(SPLIT_COLOR)
+            .setTitle('🎁 A split drop is coming down!')
+            .setDescription([
+                `**${currency}${pot.toLocaleString()}** split ${SPLIT_SHARES} ways — `
+                + `the first ${SPLIT_SHARES} to grab it get **${currency}${share.toLocaleString()}** each.`,
+                '',
+                ...(winners.length ? [...winnerLines(), ''] : []),
+                `**${Math.max(0, SPLIT_SHARES - winners.length)}** of ${SPLIT_SHARES} shares left · ${countdownLine(armedAt)}`,
+            ].join('\n'))],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(claimId).setLabel('Grab a share!').setEmoji('🎁')
+                .setStyle(ButtonStyle.Success).setDisabled(armedAt == null),
+        )],
+    });
+
+    const { sent, collector, timing } = await postArmed(
+        message.channel, render, i => i.customId === claimId && !i.user.bot,
+    );
+
+    let chain = Promise.resolve();
+    const rerender = () => {
+        chain = chain.then(() => sent.edit(closed ? closedCard() : render(timing.armedAt))).catch(() => {});
+        return chain;
+    };
+    const closedCard = () => ({
+        embeds: [new EmbedBuilder()
+            .setColor(winners.length ? COLORS.SUCCESS : COLORS.NEUTRAL)
+            .setTitle(winners.length === SPLIT_SHARES
+                ? '🎁 Split drop shared out!'
+                : winners.length ? '🎁 Split drop over' : '🎁 The split drop drifted away…')
+            .setDescription(winners.length
+                ? [...winnerLines(), '',
+                    winners.length < SPLIT_SHARES
+                        ? `-# ${SPLIT_SHARES - winners.length} unclaimed share${SPLIT_SHARES - winners.length === 1 ? '' : 's'} drifted away.`
+                        : `-# ${currency}${pot.toLocaleString()} shared ${SPLIT_SHARES} ways.`,
+                ].join('\n')
+                : `Nobody grabbed a share of the **${currency}${pot.toLocaleString()}** in time.`)
+            .setFooter({ text: 'Keep chatting — more drops are on the way.' })],
+        components: [],
+    });
+
+    collector.on('collect', async i => {
+        if (done.has(i.user.id) || inFlight.has(i.user.id)) {
+            return i.reply({ content: '🎁 You already grabbed a share — leave some for the others!', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        if (closed || sharesLeft() <= 0) {
+            return i.reply({ content: '💨 Too slow — every share is taken!', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        // Reserve a share before the first await.
+        inFlight.add(i.user.id);
+        const clickedAt = Date.now();
+        const filter = { userId: i.user.id, guildId: message.guild.id };
+
+        let snapshot;
+        try {
+            snapshot = await loadClaimant(filter);
+        } catch (err) {
+            inFlight.delete(i.user.id);
+            console.error('[chatEvent] split drop claimant read failed:', err);
+            return i.reply({ content: CLAIM_ERROR_NOTICE, flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        if (snapshot.economyFrozen) {
+            inFlight.delete(i.user.id);
+            return i.reply({ content: FROZEN_CLAIM_NOTICE, flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+
+        await i.deferUpdate().catch(() => {});
+        const prize = await payCoinPrize({
+            filter, base: share, snapshot, kind: 'split', eventMessageId: sent.id, note: 'Split drop share',
+        });
+
+        inFlight.delete(i.user.id);
+        done.add(i.user.id);
+        winners.push({ name: displayName(i), prize, time: reactionTime(timing, clickedAt) });
+
+        if (winners.length >= SPLIT_SHARES) {
+            closed = true;
+            collector.stop('claimed');
+        }
+        await rerender();
+    });
+
+    collector.on('end', () => {
+        closed = true;
+        rerender();
     });
 }
 
@@ -397,29 +603,27 @@ async function spawnCrate(message, guildSettings) {
     const currency  = guildSettings?.economy?.currency ?? '💰';
     const item      = weightedPick(CRATE_ITEMS);
     const claimId   = `chatev_crate_${message.id}`;
-    const spawnedAt = Date.now();
 
-    const embed = new EmbedBuilder()
-        .setColor(CRATE_COLOR)
-        .setTitle('📦 A supply crate crash-lands!')
-        .setDescription(
-            'Something rattles inside…\n'
-            + 'First to crack it open keeps the loot!\n\n'
-            + '-# Could be anything from a 🍀 Lucky Charm to a rare 🛟 Lifesaver.\n'
-            + `⏳ Gone ${expiryStamp(spawnedAt)}`,
-        );
-
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(claimId).setLabel('Crack it open').setEmoji('📦').setStyle(ButtonStyle.Primary),
-    );
-
-    const sent = await message.channel.send({ embeds: [embed], components: [row] });
-    let claimed = false;
-
-    const collector = sent.createMessageComponentCollector({
-        filter: i => i.customId === claimId && !i.user.bot,
-        time:   CLAIM_WINDOW_MS,
+    const render = armedAt => ({
+        embeds: [new EmbedBuilder()
+            .setColor(CRATE_COLOR)
+            .setTitle('📦 A supply crate crash-lands!')
+            .setDescription(
+                'Something rattles inside…\n'
+                + 'First to crack it open keeps the loot!\n\n'
+                + '-# Could be anything from a 🍀 Lucky Charm to a rare 🛟 Lifesaver.\n'
+                + countdownLine(armedAt),
+            )],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(claimId).setLabel('Crack it open').setEmoji('📦')
+                .setStyle(ButtonStyle.Primary).setDisabled(armedAt == null),
+        )],
     });
+
+    const { sent, collector, timing } = await postArmed(
+        message.channel, render, i => i.customId === claimId && !i.user.bot,
+    );
+    let claimed = false;
 
     collector.on('collect', async i => {
         if (claimed) {
@@ -483,7 +687,7 @@ async function spawnCrate(message, guildSettings) {
             .addFields(
                 { name: 'Rarity', value: `${info.rarityEmoji ?? ''} ${info.rarity ?? 'Unknown'}`.trim(), inline: true },
                 ...(info.value > 0 ? [{ name: 'Shop value', value: `${currency}${info.value.toLocaleString()}`, inline: true }] : []),
-                { name: 'Opened in', value: seconds(clickedAt - spawnedAt), inline: true },
+                { name: 'Opened in', value: reactionTime(timing, clickedAt), inline: true },
             )
             .setFooter({ text: 'Keep chatting — more crates are on the way.' });
         const files = botCanAttach(message.channel, message.guild)
@@ -535,36 +739,36 @@ async function spawnTrivia(message, guildSettings) {
     const q         = await getQuestion(difficulty);
     const answers   = shuffle([q.correct_answer, ...q.incorrect_answers]);
     const baseId    = `chatev_triv_${message.id}`;
-    const spawnedAt = Date.now();
 
-    const embed = new EmbedBuilder()
-        .setColor(COLORS.RARE)
-        .setTitle('⚡ Flash Trivia!')
-        .setDescription(
-            `**${q.question}**\n\n`
-            + `First correct answer wins **${currency}${TRIVIA_REWARD.toLocaleString()}**. One guess each!\n\n`
-            + `⏳ Closes ${expiryStamp(spawnedAt)}`,
-        )
-        .setFooter({ text: [q.category, difficulty].filter(Boolean).join(' · ') });
+    // While locked, the question is up and the answers are not: the beat is
+    // reading time for everyone, not just whoever was already looking.
+    const render = armedAt => ({
+        embeds: [new EmbedBuilder()
+            .setColor(COLORS.RARE)
+            .setTitle('⚡ Flash Trivia!')
+            .setDescription(
+                `**${q.question}**\n\n`
+                + `First correct answer wins **${currency}${TRIVIA_REWARD.toLocaleString()}**. One guess each!\n\n`
+                + (armedAt == null ? '🔒 Read up — answers unlock in a moment…' : countdownLine(armedAt, 'Closes')),
+            )
+            .setFooter({ text: [q.category, difficulty].filter(Boolean).join(' · ') })],
+        components: [new ActionRowBuilder().addComponents(
+            answers.map((ans, idx) =>
+                new ButtonBuilder()
+                    .setCustomId(`${baseId}_${idx}`)
+                    .setLabel(String(ans).slice(0, 80))
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(armedAt == null)
+            )
+        )],
+    });
 
-    const row = new ActionRowBuilder().addComponents(
-        answers.map((ans, idx) =>
-            new ButtonBuilder()
-                .setCustomId(`${baseId}_${idx}`)
-                .setLabel(String(ans).slice(0, 80))
-                .setStyle(ButtonStyle.Secondary)
-        )
+    const { sent, collector, timing } = await postArmed(
+        message.channel, render, i => i.customId.startsWith(baseId) && !i.user.bot,
     );
-
-    const sent = await message.channel.send({ embeds: [embed], components: [row] });
     let solved = false;
     const attempted = new Set();
     let wrongGuesses = 0;
-
-    const collector = sent.createMessageComponentCollector({
-        filter: i => i.customId.startsWith(baseId) && !i.user.bot,
-        time:   CLAIM_WINDOW_MS,
-    });
 
     collector.on('collect', async i => {
         if (solved) {
@@ -613,7 +817,7 @@ async function spawnTrivia(message, guildSettings) {
         const lines = [
             `**${q.question}**`,
             '',
-            `**${displayName(i)}** nailed it in **${seconds(clickedAt - spawnedAt)}** — **${q.correct_answer}**! 🧠`,
+            `**${displayName(i)}** nailed it in **${reactionTime(timing, clickedAt)}** — **${q.correct_answer}**! 🧠`,
             wrongGuesses > 0 ? `-# ${wrongGuesses} wrong guess${wrongGuesses === 1 ? '' : 'es'} before them.` : null,
             '',
             prize.credited ? coinPrizeLine(currency, TRIVIA_REWARD, prize) : OWED_LINE,
@@ -650,6 +854,7 @@ module.exports = {
     maybeTriggerChatEvent,
     __test__: {
         guildState, MAX_TRACKED_GUILDS, MIN_MESSAGES_BETWEEN, CRATE_ITEMS, FREQUENCY_PRESETS,
-        spawnAirdrop, spawnCrate, spawnTrivia, botCanPost, isExcluded, eventTarget, enabledKinds,
+        AUTHOR_COUNT_GAP_MS, SPLIT_SHARES, GOLDEN_MULTIPLIER, rollDropVariant,
+        spawnAirdrop, spawnSplitDrop, spawnCrate, spawnTrivia, botCanPost, isExcluded, eventTarget, enabledKinds,
     },
 };

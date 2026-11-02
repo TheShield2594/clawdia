@@ -153,7 +153,7 @@
                                 <div class="game-card-icon">🪂</div>
                                 <div class="game-card-info">
                                     <span class="game-card-name">Coin drops</span>
-                                    <span class="game-card-desc">500–2,000 coins to whoever grabs it first</span>
+                                    <span class="game-card-desc">500–2,000 coins to whoever grabs it first. Sometimes golden (3×) or split between the first three</span>
                                 </div>
                                 <label class="switch"><input type="checkbox" id="economy-chat-event-airdrops" aria-label="Coin drops" <%= settings.economy.chatEventAirdropsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
                             </div>
@@ -178,11 +178,11 @@
                         <div class="field chat-event-field-gap">
                             <label class="field-label" for="economy-chat-event-frequency">How often</label>
                             <select id="economy-chat-event-frequency">
-                                <option value="low"    <%= chatEventFrequency === 'low'    ? 'selected' : '' %>>Rarely — at most every 20 minutes, after 40+ messages</option>
-                                <option value="normal" <%= chatEventFrequency === 'normal' ? 'selected' : '' %>>Normal — at most every 10 minutes, after 20+ messages</option>
-                                <option value="high"   <%= chatEventFrequency === 'high'   ? 'selected' : '' %>>Often — at most every 5 minutes, after 10+ messages</option>
+                                <option value="low"    <%= chatEventFrequency === 'low'    ? 'selected' : '' %>>Rarely — at most every 20 minutes, after 40+ messages from 4+ people</option>
+                                <option value="normal" <%= chatEventFrequency === 'normal' ? 'selected' : '' %>>Normal — at most every 10 minutes, after 20+ messages from 3+ people</option>
+                                <option value="high"   <%= chatEventFrequency === 'high'   ? 'selected' : '' %>>Often — at most every 5 minutes, after 10+ messages from 2+ people</option>
                             </select>
-                            <small>Events stay random within these limits, so quiet servers aren't spammed</small>
+                            <small>Events stay random within these limits, so quiet servers aren't spammed. A quick burst of messages from one person counts once, so spamming doesn't summon drops</small>
                         </div>
                         <div class="field">
                             <label class="field-label" for="economy-chat-event-channel">Events channel</label>
