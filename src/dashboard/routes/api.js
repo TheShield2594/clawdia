@@ -31,9 +31,23 @@ router.use((req, res, next) => {
 // per-route opt-in produces; the read limit had no per-route opt-in to be
 // missing from at all. Mounting both centrally means a newly added route is
 // covered by default.
+//
+// Item-image reads are the one exception to the shared read budget. They are
+// <img> subresources, not API calls: the economy panel alone renders ~80
+// activity-item cards plus the guild's shop items, each its own GET, so on one
+// page load they spent the whole 120-read budget and the cards rendered last —
+// the mining Upgrades, Blasts and Consumables tabs — came back 429 and fell back
+// to their emoji. routes/api/itemImages.js meters them with its own limiter,
+// sized for a page's worth of images, so they are still rate limited, just not
+// out of the budget the real API calls share.
+const isItemImageRead = req => req.path.startsWith('/item-image/');
+
 router.use((req, res, next) => {
     if (req.method === 'OPTIONS') return next();
-    if (req.method === 'GET' || req.method === 'HEAD') return checkReadRateLimit(req, res, next);
+    if (req.method === 'GET' || req.method === 'HEAD') {
+        if (isItemImageRead(req)) return next();
+        return checkReadRateLimit(req, res, next);
+    }
     return checkCsrfOrigin(req, res, next);
 });
 

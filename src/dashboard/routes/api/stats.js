@@ -13,10 +13,16 @@ const { cachedAggregate } = require('../../lib/aggregateCache');
 
 // Recognised read limiter for the two collection-wide aggregations, tighter than
 // the general read ceiling because each call is expensive. Installed with
-// router.use below so it guards every route in this router — to CodeQL and at
-// runtime — rather than being listed on each one (see lib/readRateLimit.js).
+// router.use below so it guards both routes — to CodeQL and at runtime — rather
+// than being listed on each one (see lib/readRateLimit.js).
+//
+// Mounted on the two paths it guards, not bare: this router sits ahead of most
+// of the API, and a bare, pathless use() meters every request that merely passes
+// through it on the way to a later router. That counted every item-image <img>
+// on the economy panel against this 60-a-minute ceiling, so the cards drawn last
+// (the mining Upgrades, Blasts and Consumables tabs) came back 429.
 const statsReadRateLimit = rateLimit(readRateLimitOptions(60));
-router.use(statsReadRateLimit);
+router.use(['/guild/:guildId/stats', '/guild/:guildId/insights'], statsReadRateLimit);
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
 // read only for the handful of settings the recommendations look at, named so

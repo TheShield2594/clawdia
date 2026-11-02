@@ -64,7 +64,10 @@ describe('readRateLimitOptions builds a working limiter', () => {
 
 // The install, read from source: the limiter is mounted with router.use ahead of
 // every route in the file, which is what guards them — to CodeQL and at runtime.
-// A router.use placed after a route would not cover it.
+// A router.use placed after a route would not cover it. It is mounted on the
+// router's own paths, not bare: a pathless router.use meters every request that
+// passes through the router on its way to a later one, which counted every
+// item-image <img> on the economy panel against the 60-a-minute stats ceiling.
 const FILES = [
     ['stats.js',      'statsReadRateLimit'],
     ['itemImages.js', 'imageReadRateLimit'],
@@ -75,7 +78,10 @@ describe('each router installs its read limiter ahead of its routes', () => {
         const src = fs.readFileSync(
             path.join(__dirname, '..', 'src', 'dashboard', 'routes', 'api', file), 'utf8',
         );
-        const useIdx = src.indexOf(`router.use(${limiter})`);
+        const mount = src.match(new RegExp(`router\\.use\\(([^)]*?),\\s*${limiter}\\)`));
+        expect(mount).not.toBeNull();
+        expect(mount[1]).toMatch(/^\s*[['"]/);
+        const useIdx = mount.index;
         const firstRoute = src.search(/router\.(get|post|put|patch|delete)\(/);
         expect(useIdx).toBeGreaterThan(-1);
         expect(firstRoute).toBeGreaterThan(-1);

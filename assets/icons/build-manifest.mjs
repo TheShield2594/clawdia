@@ -81,20 +81,31 @@ const RIFLE_SUBJECT = {
     altair_rifle:     'Same silhouette as a basic hunting rifle: cosmic blue-black barrel and receiver with a swirling starfield surface and glowing constellation points, a telescopic scope, a cosmic glow. Angled diagonally from lower-left to upper-right.',
 };
 
+// Shape first, as with the pickaxes below. The first pass said only "a fishing
+// rod", and against the hunt:steel_rifle anchor the higher tiers grew stocks and
+// scopes. Regenerated 2026-11-02 against the new fish:reinforced_grip (a correct
+// rod handle) as the reference instead of the rifle — see STYLE.md §3.
+const ROD_SHAPE = 'A long, slender fishing rod: a thin straight pole that tapers to a fine tip, with a straight cylindrical handle at its lower end the same width as the pole, small ring line guides along the pole, and a thin curved fishing line running from the tip down to a small hook. Angled diagonally, handle lower-left, tip upper-right. Nothing behind the object: the inside of the rim is empty and transparent.';
 const ROD_SUBJECT = {
-    bamboo_rod:     'Same silhouette as a fishing rod: a natural bamboo rod shaft with a simple cord wrap, no reel, fishing line hanging with a small hook. Angled diagonally from lower-left to upper-right.',
-    fiberglass_rod: 'Same silhouette as a fishing rod: a green fiberglass rod shaft with a simple spinning reel, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    carbon_rod:     'Same silhouette as a fishing rod: a black carbon-fiber rod shaft with a precision spinning reel and metal handle, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    titanium_rod:   'Same silhouette as a fishing rod: a polished titanium rod shaft with a high-end machined reel and a subtle metallic sheen, fishing line and a small hook. Angled diagonally from lower-left to upper-right.',
-    crystal_rod:    'Same silhouette as a fishing rod: a translucent glowing crystal rod shaft with an ornate reel and a soft magical glow, enchanted line with a shimmering lure. Angled diagonally from lower-left to upper-right.',
+    bamboo_rod:     `${ROD_SHAPE} A natural yellow bamboo pole with visible joints and a simple cord-wrapped handle, no reel.`,
+    fiberglass_rod: `${ROD_SHAPE} A green fiberglass pole with a cork handle and a small grey spinning reel hanging beneath the handle.`,
+    carbon_rod:     `${ROD_SHAPE} A black carbon-fiber pole with a dark foam handle and a precise silver-and-blue spinning reel hanging beneath the handle.`,
+    titanium_rod:   `${ROD_SHAPE} A polished silver titanium pole with a black foam handle and a machined purple-anodised spinning reel hanging beneath the handle.`,
+    crystal_rod:    `${ROD_SHAPE} A translucent pale-cyan crystal pole with a soft glow, a gold-banded handle, an ornate gold reel hanging beneath the handle, and a shimmering lure on the line.`,
 };
 
+// The shared silhouette is spelled out shape-first. The first pass named only
+// "a mining pickaxe" and let the style anchor (hunt:steel_rifle) fill in the
+// shape, and three of the five came back as long-barrelled rifles with a blade
+// on the end. Regenerated 2026-11-02 against the iron pickaxe (the one that
+// came out right) as the reference instead of the rifle — see STYLE.md §3.
+const PICKAXE_SHAPE = 'A classic T-shaped mining pickaxe: a short straight handle with a curved, double-pointed pick head mounted crosswise at its top end, both points curving down like a crescent. The handle is about twice as long as the head is wide.';
 const PICKAXE_SUBJECT = {
-    wooden_pickaxe:  'Same silhouette as a mining pickaxe: a rough hewn stone-and-wood head on a sturdy wooden handle. Angled diagonally from lower-left to upper-right.',
+    wooden_pickaxe:  `${PICKAXE_SHAPE} A rough-hewn grey stone pick head lashed to a plain wooden handle with rope. Angled diagonally, handle lower-left, head upper-right.`,
     iron_pickaxe:    'Same silhouette as a mining pickaxe: a forged iron head on a wooden handle with a riveted band. Angled diagonally from lower-left to upper-right.',
-    steel_pickaxe:   'Same silhouette as a mining pickaxe: a hardened polished steel head on a reinforced wooden handle. Angled diagonally from lower-left to upper-right.',
-    diamond_pickaxe: 'Same silhouette as a mining pickaxe: a steel head tipped with glittering diamond edges on a metal-banded handle, a faint sparkle. Angled diagonally from lower-left to upper-right.',
-    void_pickaxe:    'Same silhouette as a mining pickaxe: a dark void-matter head wreathed in purple smoke on an obsidian handle, a soft purple magical glow. Angled diagonally from lower-left to upper-right.',
+    steel_pickaxe:   `${PICKAXE_SHAPE} A bright polished steel pick head on a wooden handle with a steel collar and a leather-wrapped grip. Angled diagonally, handle lower-left, head upper-right.`,
+    diamond_pickaxe: `${PICKAXE_SHAPE} A steel pick head whose two points are capped with faceted pale-blue diamond tips, on a metal-banded wooden handle, one small sparkle. Angled diagonally, handle lower-left, head upper-right.`,
+    void_pickaxe:    `${PICKAXE_SHAPE} A jet-black void-matter pick head with thin glowing purple cracks and a wisp of purple smoke, on a dark obsidian handle. Angled diagonally, handle lower-left, head upper-right.`,
 };
 
 // --- non-ladder subjects, keyed by bare id ----------------------------------
@@ -117,7 +128,8 @@ const SUBJECT = {
     // fish upgrades / bait
     enhanced_line: 'a spool of strong braided fishing line, a neat coil of thin high-tensile line.',
     polarized_lens: 'a pair of polarized sunglasses with sleek dark frames and a blue reflective sheen.',
-    reinforced_grip: 'a reinforced rubber fishing-rod grip handle with metal bracing.',
+    // Regenerated 2026-11-02: "fishing-rod grip handle" came back as a rifle.
+    reinforced_grip: 'a short fishing-rod handle section standing upright: a fat cylindrical cork grip bound with two steel bands, a metal reel seat above it and a round rubber butt cap below. No rod, no reel, nothing behind the object.',
     worm_bait_pack: 'a small plastic tub of pink fishing worms.',
     shrimp_bait_pack: 'a small tub of pink shrimp bait.',
     lure_pack: 'a set of shiny metal fishing lures with treble hooks.',
@@ -130,9 +142,12 @@ const SUBJECT = {
     energy_drink: 'a tall can of energy drink with a lightning-bolt logo.',
     hunters_brew: 'a bubbling brown potion in a glass Erlenmeyer flask.',
     // mine upgrades / blasts
-    tempered_edge: 'a gleaming honed tempered pickaxe blade edge.',
+    // Regenerated 2026-11-02: "pickaxe blade edge" came back as a rifle with a
+    // blade, and the handle as a lone rod over a green haze. Both now name a
+    // part that cannot be read as a gun, and nothing behind it.
+    tempered_edge: 'a lone curved, double-pointed iron pickaxe head with no handle, its points freshly honed to a bright silver edge, a small grey whetstone resting against it. Nothing behind the object.',
     gem_lens: "a jeweler's gem loupe, a small magnifying lens in a metal frame with a faint gem sparkle.",
-    reinforced_handle: 'a reinforced pickaxe handle wrapped in metal bracing and grip tape.',
+    reinforced_handle: 'a short, thick wooden tool handle standing upright, bound with three riveted steel bands and a dark leather grip wrap at the base. Nothing behind the object.',
     iron_blast_pack: 'a bundle of iron blasting charges tied together with a fuse.',
     steel_blast_pack: 'a cluster of round steel bombs with short lit fuses.',
     explosive_charge_pack: 'a bundle of red dynamite explosive charges tied together.',

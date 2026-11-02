@@ -58,6 +58,24 @@
       "count": 11,
       "quality": "high",
       "note": "exploration materials for the /inventory Explore tab (issue #1172)"
+    },
+    "mineGearRegenerated": {
+      "date": "2026-11-02",
+      "count": 6,
+      "quality": "high",
+      "note": "wooden/steel/diamond/void pickaxes, tempered_edge and reinforced_handle: the first pass read as rifles (steel_rifle anchor bleed). Anchored to mine:iron_pickaxe (02d6e472-…) instead; wooden_pickaxe to the new steel_pickaxe after its first retry came back on a filled disc."
+    },
+    "fishGripRegenerated": {
+      "date": "2026-11-02",
+      "count": 1,
+      "quality": "high",
+      "note": "fish:reinforced_grip read as a rifle; regenerated against fish:enhanced_line (43e3ecf2-…) instead of the rifle anchor."
+    },
+    "fishRodsRegenerated": {
+      "date": "2026-11-02",
+      "count": 5,
+      "quality": "high",
+      "note": "all five rods grew rifle stocks/scopes (steel_rifle anchor bleed). Anchored to the new fish:reinforced_grip (d4a93f1f-…); carbon_rod redone against the new fiberglass_rod after a grey haze."
     }
   },
   "items": {
@@ -195,69 +213,69 @@
     },
     "fish:bamboo_rod": {
       "file": "fish__bamboo_rod.png",
-      "jobId": "5b4b1d48-0349-4873-b117-9ce41c7e748a",
+      "jobId": "6865fadd-9aa0-4873-b856-01d5c74a2555",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171838_5b4b1d48-0349-4873-b117-9ce41c7e748a.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_173152_6865fadd-9aa0-4873-b856-01d5c74a2555.png"
     },
     "fish:fiberglass_rod": {
       "file": "fish__fiberglass_rod.png",
-      "jobId": "bf5e43f7-9b50-4525-9146-b8bade8e4c43",
+      "jobId": "828cced2-ea64-4f0d-8cac-d7fd4a600396",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171943_bf5e43f7-9b50-4525-9146-b8bade8e4c43.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_173150_828cced2-ea64-4f0d-8cac-d7fd4a600396.png"
     },
     "fish:carbon_rod": {
       "file": "fish__carbon_rod.png",
-      "jobId": "150fc37d-a47f-4b7f-bb55-b8db2ab4831f",
+      "jobId": "b76289f8-09c3-4801-828b-0d45b7d5cf4e",
       "rarity": "Rare",
       "rim": "sapphire-blue",
       "rimHex": "#3498DB",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "828cced2-ea64-4f0d-8cac-d7fd4a600396",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171943_150fc37d-a47f-4b7f-bb55-b8db2ab4831f.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_173311_b76289f8-09c3-4801-828b-0d45b7d5cf4e.png"
     },
     "fish:titanium_rod": {
       "file": "fish__titanium_rod.png",
-      "jobId": "6b3f0e6d-e1d0-457d-9ce2-20b87b130617",
+      "jobId": "03a6d9f4-67f0-4ba5-9f88-ad2d1f51fcfa",
       "rarity": "Epic",
       "rim": "amethyst-purple",
       "rimHex": "#9B59B6",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173318_6b3f0e6d-e1d0-457d-9ce2-20b87b130617.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_173150_03a6d9f4-67f0-4ba5-9f88-ad2d1f51fcfa.png"
     },
     "fish:crystal_rod": {
       "file": "fish__crystal_rod.png",
-      "jobId": "869c2bf3-2892-4641-a894-e1735cdc32af",
+      "jobId": "5e7c1ce3-4736-4960-a370-529b7870c1fc",
       "rarity": "Legendary",
       "rim": "radiant-gold",
       "rimHex": "#FFD700",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_171943_869c2bf3-2892-4641-a894-e1735cdc32af.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_173234_5e7c1ce3-4736-4960-a370-529b7870c1fc.png"
     },
     "mine:wooden_pickaxe": {
       "file": "mine__wooden_pickaxe.png",
-      "jobId": "915ebb8c-587e-4a37-8167-cc8aa4852310",
+      "jobId": "db42ee44-c19f-4a55-b8b4-239f964cf492",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "0a56cfe0-63f7-49a6-b128-6c5e81cbe4b4",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173317_915ebb8c-587e-4a37-8167-cc8aa4852310.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171640_db42ee44-c19f-4a55-b8b4-239f964cf492.png"
     },
     "mine:iron_pickaxe": {
       "file": "mine__iron_pickaxe.png",
@@ -272,36 +290,36 @@
     },
     "mine:steel_pickaxe": {
       "file": "mine__steel_pickaxe.png",
-      "jobId": "8a5d0b1f-67ae-4080-bd7d-61da62b0ca2b",
+      "jobId": "0a56cfe0-63f7-49a6-b128-6c5e81cbe4b4",
       "rarity": "Rare",
       "rim": "sapphire-blue",
       "rimHex": "#3498DB",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "02d6e472-561a-4129-a40b-b3cd33a43826",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_172034_8a5d0b1f-67ae-4080-bd7d-61da62b0ca2b.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171500_0a56cfe0-63f7-49a6-b128-6c5e81cbe4b4.png"
     },
     "mine:diamond_pickaxe": {
       "file": "mine__diamond_pickaxe.png",
-      "jobId": "f379cac7-78a7-48f3-8c79-fa8312573691",
+      "jobId": "9291e0ac-1700-4200-b413-9f13ca903a9c",
       "rarity": "Epic",
       "rim": "amethyst-purple",
       "rimHex": "#9B59B6",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "02d6e472-561a-4129-a40b-b3cd33a43826",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_172034_f379cac7-78a7-48f3-8c79-fa8312573691.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171501_9291e0ac-1700-4200-b413-9f13ca903a9c.png"
     },
     "mine:void_pickaxe": {
       "file": "mine__void_pickaxe.png",
-      "jobId": "ce51db2a-84d2-4aca-8b6f-22ed9936eab9",
+      "jobId": "86e356fb-fd29-4830-b139-16614d366836",
       "rarity": "Legendary",
       "rim": "radiant-gold",
       "rimHex": "#FFD700",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "02d6e472-561a-4129-a40b-b3cd33a43826",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173317_ce51db2a-84d2-4aca-8b6f-22ed9936eab9.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171501_86e356fb-fd29-4830-b139-16614d366836.png"
     },
     "hunt:rifled_barrel": {
       "file": "hunt__rifled_barrel.png",
@@ -360,25 +378,25 @@
     },
     "fish:reinforced_grip": {
       "file": "fish__reinforced_grip.png",
-      "jobId": "51385d4c-602c-4514-ae1d-b6c4ea6d1ea8",
+      "jobId": "d4a93f1f-7b85-4118-86c4-a59dca4d1009",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "43e3ecf2-ea1a-41bc-b5e2-2ba21bb3998e",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173355_51385d4c-602c-4514-ae1d-b6c4ea6d1ea8.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_172113_d4a93f1f-7b85-4118-86c4-a59dca4d1009.png"
     },
     "mine:tempered_edge": {
       "file": "mine__tempered_edge.png",
-      "jobId": "e6845f2e-31ac-4421-b9b1-fe41eedd212b",
+      "jobId": "e9eb73cf-5f16-4433-86b8-c39201a3f85e",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "02d6e472-561a-4129-a40b-b3cd33a43826",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_172127_e6845f2e-31ac-4421-b9b1-fe41eedd212b.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171557_e9eb73cf-5f16-4433-86b8-c39201a3f85e.png"
     },
     "mine:gem_lens": {
       "file": "mine__gem_lens.png",
@@ -393,14 +411,14 @@
     },
     "mine:reinforced_handle": {
       "file": "mine__reinforced_handle.png",
-      "jobId": "df1e40d7-9f85-4759-8bdd-e5303bc63e3a",
+      "jobId": "874de98b-c207-4ee4-a003-731a714e04b9",
       "rarity": "Uncommon",
       "rim": "emerald-green",
       "rimHex": "#2ECC71",
-      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "anchor": "02d6e472-561a-4129-a40b-b3cd33a43826",
       "model": "gpt_image_2_5",
-      "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_172128_df1e40d7-9f85-4759-8bdd-e5303bc63e3a.png"
+      "date": "2026-11-02",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261102_171558_874de98b-c207-4ee4-a003-731a714e04b9.png"
     },
     "hunt:iron_shot_pack": {
       "file": "hunt__iron_shot_pack.png",
