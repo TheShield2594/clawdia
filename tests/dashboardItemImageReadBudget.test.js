@@ -92,6 +92,16 @@ describe('item-image reads are still rate limited', () => {
         expect(over.status).toBe(429);
     });
 
+    test('and /insights, the other aggregation it covers', async () => {
+        const app = makeApp();
+        for (let i = 0; i < 60; i++) {
+            const res = await request(app).get('/api/guild/123/insights');
+            expect(res.status).toBe(401);
+        }
+        const over = await request(app).get('/api/guild/123/insights');
+        expect(over.status).toBe(429);
+    });
+
     test('a write to an item image still goes through origin validation', async () => {
         const res = await request(makeApp())
             .post('/api/item-image/shop/123/lucky_charm')
