@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 484,
+    "count": 487,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -82,6 +82,12 @@
       "count": 4,
       "quality": "high",
       "note": "T1–T3 rifles carried a scope (STYLE.md §4 puts it at T4) and wooden/iron sat on a filled disc; iron_shot_pack sat on a filled disc. Rifles referenced the shipped hunt:steel_rifle (309b1ed7-…), the pack hunt:steel_shot_pack (8d2ed594-…)."
+    },
+    "newPetsAdded": {
+      "date": "2026-11-04",
+      "count": 3,
+      "quality": "high",
+      "note": "Hamster, Goat and Badger shop pet portraits, against the catalogue anchor like the first 14 pets."
     }
   },
   "items": {
@@ -3032,6 +3038,39 @@
       "model": "gpt_image_2_5",
       "date": "2026-09-21",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_9a70c3c1-218e-45a3-a6b5-60a58932d410.png"
+    },
+    "pet:hamster": {
+      "file": "pet__hamster.png",
+      "jobId": "52711ca9-fd7a-4bc9-83fa-bd63c88ca38e",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-11-04",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182626_52711ca9-fd7a-4bc9-83fa-bd63c88ca38e.png"
+    },
+    "pet:goat": {
+      "file": "pet__goat.png",
+      "jobId": "708520a7-5470-4d82-853e-e2b234159963",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-11-04",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182628_708520a7-5470-4d82-853e-e2b234159963.png"
+    },
+    "pet:badger": {
+      "file": "pet__badger.png",
+      "jobId": "d56782cc-f29d-466f-bb00-57495a102890",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-11-04",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182626_d56782cc-f29d-466f-bb00-57495a102890.png"
     },
     "pet:eagle": {
       "file": "pet__eagle.png",
