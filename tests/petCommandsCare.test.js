@@ -145,13 +145,13 @@ describe('/pet adopt', () => {
         expect(stored().pets).toHaveLength(1);
         expect(stored().pets[0]).toEqual(expect.objectContaining({
             petId: 'dog', name: 'Rex', hunger: 100, level: 1, xp: 0,
-            // Math.random is pinned to 0.5, which picks the third trait.
-            personality: 'mischievous',
+            // Math.random is pinned to 0.5, which picks the fourth of six traits.
+            personality: 'loyal',
         }));
         const text = textOf(interaction);
         expect(text).toContain('New Pet Adopted!');
         expect(text).toContain('Welcome **Rex**');
-        expect(text).toContain('Mischievous');
+        expect(text).toContain('Loyal');
         expect(text).toContain('2,000 🪙');
         expect(checkAndAward).toHaveBeenCalledTimes(1);
         expect(announceAchievements).not.toHaveBeenCalled(); // nothing earned
@@ -777,6 +777,80 @@ describe('/pet feed', () => {
 
 // ─── /pet release ───────────────────────────────────────────────────────────────
 
+describe('/pet ascend', () => {
+    const confirm = { customId: 'pet_ascend_yes:interaction-1' };
+    const cancel  = { customId: 'pet_ascend_no:interaction-1' };
+    const maxed = (over = {}) => makePet({ _id: 'p-wolf', petId: 'wolf', name: 'Rex', level: 30, xp: 99_999, evolutionStage: 3, bond: 40, ...over });
+
+    test('asks first, and a confirmed ascension resets the level for a star', async () => {
+        seedUser({ pets: [maxed()] });
+
+        const interaction = await run('ascend', { slot: 'p-wolf' }, { components: [confirm] });
+
+        const prompt = interaction.replies[0];
+        expect(prompt.embeds[0].data.title).toBe('Ascend Rex?');
+        expect(prompt.embeds[0].data.description).toContain('star 1 of 3');
+        expect(prompt.components[0].components.map(c => c.data.custom_id))
+            .toEqual(['pet_ascend_yes:interaction-1', 'pet_ascend_no:interaction-1']);
+        expect(stored().pets[0]).toMatchObject({ level: 1, xp: 0, evolutionStage: 1, ascensions: 1, bond: 40, name: 'Rex' });
+        expect(textOf(interaction)).toContain('Rex ascended!');
+        expect(checkAndAward).toHaveBeenCalled();
+        // The press is acknowledged before the database work, and answered after.
+        expect(interaction.replies.at(-1).embeds[0].data.title).toContain('Rex ascended!');
+    });
+
+    test('a pet below level 30 is refused before the prompt', async () => {
+        seedUser({ pets: [maxed({ level: 12, evolutionStage: 2 })] });
+
+        const interaction = await run('ascend', { slot: '0' });
+
+        expect(interaction.replies).toHaveLength(1);
+        expect(textOf(interaction)).toContain('needs to reach level 30');
+    });
+
+    test('a slot with no pet is refused', async () => {
+        seedUser({ pets: [maxed()] });
+        const interaction = await run('ascend', { slot: '4' });
+        expect(textOf(interaction)).toContain("Couldn't find that pet");
+    });
+
+    test('Not yet leaves the pet alone, and so does no answer', async () => {
+        seedUser({ pets: [maxed()] });
+        let interaction = await run('ascend', { slot: '0' }, { components: [cancel] });
+        expect(interaction.replies.at(-1).content).toBe('**Rex** stays as it is.');
+
+        interaction = await run('ascend', { slot: '0' });
+        expect(interaction.replies.at(-1).content).toContain('Ascension cancelled');
+        expect(stored().pets[0].level).toBe(30);
+        expect(stored().pets[0].ascensions ?? 0).toBe(0);
+    });
+
+    test('a pet that ascended or left while the prompt was open is reported', async () => {
+        seedUser({ pets: [maxed()] });
+        let loads = 0;
+        mockAfterLoad = user => { if (++loads === 2) user.pets[0].ascensions = 3; };
+        let interaction = await run('ascend', { slot: 'p-wolf' }, { components: [confirm] });
+        expect(interaction.replies.at(-1).content).toContain('already has all 3');
+
+        mockUsers.reset();
+        seedUser({ pets: [maxed()] });
+        loads = 0;
+        mockAfterLoad = user => { if (++loads === 2) user.pets = []; };
+        interaction = await run('ascend', { slot: 'p-wolf' }, { components: [confirm] });
+        expect(interaction.replies.at(-1).content).toBe('**Rex** is no longer in your roster.');
+    });
+
+    test('a version race that never settles is reported as a conflict', async () => {
+        seedUser({ pets: [maxed()] });
+        mockAfterLoad = user => { user.save = jest.fn(async () => { throw versionError(); }); };
+
+        const interaction = await run('ascend', { slot: '0' }, { components: [confirm] });
+
+        expect(interaction.replies.at(-1).content).toBe('Edit conflict — try again.');
+        expect(stored().pets[0].level).toBe(30);
+    });
+});
+
 describe('/pet release', () => {
     const confirm = { customId: 'pet_release_yes:interaction-1' };
     const cancel  = { customId: 'pet_release_no:interaction-1' };
@@ -1005,7 +1079,7 @@ describe('/pet codex', () => {
         const interaction = await run('codex');
 
         const text = textOf(interaction);
-        expect(text).toContain('2 of 10');
+        expect(text).toContain('2 of 13');
         expect(text).toContain('Lantern Owl');
         expect(text).toContain('appears on a legendary expedition (/explore)');
         expect(text).toContain('Eagle');
@@ -1128,7 +1202,7 @@ describe('/pet leaderboard', () => {
             '🥈 🐕 **Seasoned Dog** ⭐⭐ — Lv**12** — <@u2>',
             '🥉 🐾 **nope** ⭐ — Lv**1** — <@u3>',
         ]);
-        expect(pipelineOf()[3]).toEqual({ $sort: { petLevel: -1 } });
+        expect(pipelineOf()[3]).toEqual({ $sort: { petAscensions: -1, petLevel: -1 } });
     });
 
     test('by wins ranks member-vs-member results only', async () => {
@@ -1184,7 +1258,7 @@ describe('/pet dispatcher', () => {
     test('the definition carries every subcommand', () => {
         const json = pet.data.toJSON();
         expect(json.name).toBe('pet');
-        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'list', 'codex', 'vacation', 'leaderboard', 'battle']);
+        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'ascend', 'list', 'codex', 'vacation', 'leaderboard', 'battle']);
     });
 });
 

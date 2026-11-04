@@ -18,6 +18,25 @@ const { CORE_REGION_IDS, TOTAL_CORE_SECRETS } = require('./exploreData');
 // never re-checked and never taken back.
 const RARE_COMPANION_IDS = ['eagle', 'shark', 'crystal_fox', 'lantern_owl'];
 
+// Every ownable species, for the codex achievement. A literal for the same
+// reason as the list above; tests/petAchievements asserts it matches
+// PET_DEFINITIONS. Adding a species widens the achievement for players who
+// have not earned it yet and, as with Menagerie, never takes it back.
+const ALL_PET_IDS = [
+    'dog', 'cat', 'bird', 'fish', 'fox', 'wolf', 'hamster', 'goat', 'badger',
+    ...RARE_COMPANION_IDS,
+];
+
+// Species a player has ever owned: the codex record, the roster and the
+// memorial, as /pet codex counts them (petService.codexSpecies).
+function codexOwned(user) {
+    return new Set([
+        ...(user.petCodex || []),
+        ...(user.pets || []).map(p => p.petId),
+        ...(user.deceasedPets || []).map(p => p.petId),
+    ]);
+}
+
 // Days a member has gone without a warning: since their last one, or since the
 // account was first recorded when they have never had one. Returns 0 when
 // neither date is available, so a document without either stays locked rather
@@ -584,6 +603,45 @@ const ACHIEVEMENTS = [
             return [RARE_COMPANION_IDS.filter(id => owned.has(id)).length, RARE_COMPANION_IDS.length];
         }
     },
+    {
+        id: 'zoologist',
+        name: 'Zoologist',
+        description: 'Fill the pet codex: own every species at least once',
+        emoji: '📖',
+        category: 'pets',
+        xpReward: 1_500,
+        coinReward: 20_000,
+        check: (user) => {
+            const owned = codexOwned(user);
+            return ALL_PET_IDS.every(id => owned.has(id));
+        },
+        progress: (user) => {
+            const owned = codexOwned(user);
+            return [ALL_PET_IDS.filter(id => owned.has(id)).length, ALL_PET_IDS.length];
+        }
+    },
+    {
+        id: 'ascendant',
+        name: 'Ascendant',
+        description: 'Ascend a pet: take it to level 30, then start it over for a star',
+        emoji: '✦',
+        category: 'pets',
+        xpReward: 750,
+        coinReward: 7_500,
+        check: (user) => (user.pets || []).some(p => (p.ascensions || 0) >= 1),
+        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.ascensions || 0)), 1), 1]
+    },
+    {
+        id: 'starbound',
+        name: 'Starbound',
+        description: 'Give one pet all three ascension stars',
+        emoji: '🌠',
+        category: 'pets',
+        xpReward: 2_000,
+        coinReward: 25_000,
+        check: (user) => (user.pets || []).some(p => (p.ascensions || 0) >= 3),
+        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.ascensions || 0)), 3), 3]
+    },
 
     // ── Secret ────────────────────────────────────────────────────────────────
     // Secret achievements are hidden (name/description/progress concealed) until earned.
@@ -938,4 +996,4 @@ const CATEGORY_EMOJIS = {
     custom: '⚙️'
 };
 
-module.exports = { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS, RARE_COMPANION_IDS };
+module.exports = { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS, RARE_COMPANION_IDS, ALL_PET_IDS };

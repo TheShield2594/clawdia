@@ -2413,6 +2413,33 @@
   },
   {
     "index": 268,
+    "key": "pet:hamster",
+    "file": "pet__hamster.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Pet portrait icon: a plump golden hamster with bulging stuffed cheeks, tiny pink paws and bright black eyes, sitting up and facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick emerald-green rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 269,
+    "key": "pet:goat",
+    "file": "pet__goat.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Pet portrait icon: a sure-footed white mountain goat with short curved horns, a little beard and a cheeky expression, head and shoulders facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick emerald-green rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 270,
+    "key": "pet:badger",
+    "file": "pet__badger.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Pet portrait icon: a stocky badger with a bold black-and-white striped face, grey fur and strong digging claws, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick sapphire-blue rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 271,
     "key": "pet:eagle",
     "file": "pet__eagle.png",
     "rarity": "Legendary",
@@ -2421,7 +2448,7 @@
     "prompt": "Pet portrait icon: a majestic bald eagle with a white head, sharp golden hooked beak and a fierce gaze, head and shoulders facing the viewer, a faint radiant glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 269,
+    "index": 272,
     "key": "pet:shark",
     "file": "pet__shark.png",
     "rarity": "Legendary",
@@ -2430,7 +2457,7 @@
     "prompt": "Pet portrait icon: a sleek grey great white shark with a toothy grin and a pale underbelly, shown side-on facing the viewer, a faint aura. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 270,
+    "index": 273,
     "key": "pet:crystal_fox",
     "file": "pet__crystal_fox.png",
     "rarity": "Legendary",
@@ -2439,7 +2466,7 @@
     "prompt": "Pet portrait icon: a mystical fox sculpted from glowing translucent blue crystal, faceted fur and shining eyes, sitting and facing the viewer, a soft magical glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 271,
+    "index": 274,
     "key": "pet:lantern_owl",
     "file": "pet__lantern_owl.png",
     "rarity": "Legendary",
@@ -2448,7 +2475,7 @@
     "prompt": "Pet portrait icon: a wise round owl whose chest holds a glowing amber lantern, big luminous eyes and soft feathers, facing the viewer, a warm soft glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 272,
+    "index": 275,
     "key": "pet:wild_boar",
     "file": "pet__wild_boar.png",
     "rarity": "Common",
@@ -2457,7 +2484,7 @@
     "prompt": "Pet portrait icon: a bristly brown wild boar with curved tusks, a snorting snout and small angry eyes, head and shoulders facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 273,
+    "index": 276,
     "key": "pet:feral_cat",
     "file": "pet__feral_cat.png",
     "rarity": "Common",
@@ -2466,7 +2493,7 @@
     "prompt": "Pet portrait icon: a scruffy grey alley cat with a torn ear, patchy fur and a wary hiss, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 274,
+    "index": 277,
     "key": "pet:stray_hound",
     "file": "pet__stray_hound.png",
     "rarity": "Common",
@@ -2475,7 +2502,7 @@
     "prompt": "Pet portrait icon: a lean scruffy stray hound with matted brown fur and a scrappy, alert stance, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 275,
+    "index": 278,
     "key": "pet:cave_bat",
     "file": "pet__cave_bat.png",
     "rarity": "Common",
@@ -2484,7 +2511,7 @@
     "prompt": "Pet portrait icon: a small dark cave bat with spread leathery wings, big ears and beady eyes, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 276,
+    "index": 279,
     "key": "explore:whispering_forest",
     "file": "explore__whispering_forest.png",
     "rarity": "Common",
@@ -2493,7 +2520,7 @@
     "prompt": "Game item icon: a round scene emblem of a moody old-growth pine forest in green half-light, gnarled trunks and drifting mist. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 277,
+    "index": 280,
     "key": "explore:crumbling_ruins",
     "file": "explore__crumbling_ruins.png",
     "rarity": "Uncommon",
@@ -2502,7 +2529,7 @@
     "prompt": "Game item icon: a round scene emblem of toppled marble ruins, broken columns and a headless statue under a pale sky. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 278,
+    "index": 281,
     "key": "explore:crystal_caves",
     "file": "explore__crystal_caves.png",
     "rarity": "Rare",
@@ -2511,7 +2538,7 @@
     "prompt": "Game item icon: a round scene emblem of a glittering cavern of humming violet crystals, faceted walls glowing from within. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 279,
+    "index": 282,
     "key": "explore:sunken_docks",
     "file": "explore__sunken_docks.png",
     "rarity": "Epic",
@@ -2520,7 +2547,7 @@
     "prompt": "Game item icon: a round scene emblem of a half-sunken harbor town, barnacled docks and rooftops rising from calm blue water. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 280,
+    "index": 283,
     "key": "explore:starfall_wastes",
     "file": "explore__starfall_wastes.png",
     "rarity": "Legendary",
@@ -2529,7 +2556,7 @@
     "prompt": "Game item icon: a round scene emblem of a black-glass desert under a starry night sky, meteor craters and a single falling star. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 281,
+    "index": 284,
     "key": "explore:frostveil_pass",
     "file": "explore__frostveil_pass.png",
     "rarity": "Rare",
@@ -2538,7 +2565,7 @@
     "prompt": "Game item icon: a round scene emblem of a snowbound mountain pass strung with glowing lanterns and soft falling snow. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 282,
+    "index": 285,
     "key": "explore:hollowgrave_lane",
     "file": "explore__hollowgrave_lane.png",
     "rarity": "Rare",
@@ -2547,7 +2574,7 @@
     "prompt": "Game item icon: a round scene emblem of a foggy crooked lane of leaning houses lit by grinning jack-o'-lanterns. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 283,
+    "index": 286,
     "key": "explore:scorchglass_shore",
     "file": "explore__scorchglass_shore.png",
     "rarity": "Rare",
@@ -2556,7 +2583,7 @@
     "prompt": "Game item icon: a round scene emblem of a sunlit beach of shimmering glass sand beside turquoise summer waves. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 284,
+    "index": 287,
     "key": "explore:velvet_arcade",
     "file": "explore__velvet_arcade.png",
     "rarity": "Rare",
@@ -2565,7 +2592,7 @@
     "prompt": "Game item icon: a round scene emblem of a gaslit covered arcade of little shopfronts with warm rose light and hanging lamps. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 285,
+    "index": 288,
     "key": "explore:arctic_tundra",
     "file": "explore__arctic_tundra.png",
     "rarity": "Rare",
@@ -2574,7 +2601,7 @@
     "prompt": "Game item icon: a round scene emblem of a flat frozen tundra under a green aurora, ice and distant white peaks. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 286,
+    "index": 289,
     "key": "relic:whisperwood_charm",
     "file": "relic__whisperwood_charm.png",
     "rarity": "Rare",
@@ -2583,7 +2610,7 @@
     "prompt": "Game item icon: a small charm of pale knotted wood on a leather cord, faint carved swirls. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 287,
+    "index": 290,
     "key": "relic:candlewax_antler",
     "file": "relic__candlewax_antler.png",
     "rarity": "Epic",
@@ -2592,7 +2619,7 @@
     "prompt": "Game item icon: a shed deer antler tip dripping warm candlewax, a tiny flame glowing at its point. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 288,
+    "index": 291,
     "key": "relic:the_tenth_owl",
     "file": "relic__the_tenth_owl.png",
     "rarity": "Legendary",
@@ -2601,7 +2628,7 @@
     "prompt": "Game item icon: a small carved stone owl statuette with softly glowing eyes. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 289,
+    "index": 292,
     "key": "relic:headless_coin",
     "file": "relic__headless_coin.png",
     "rarity": "Rare",
@@ -2610,7 +2637,7 @@
     "prompt": "Game item icon: an ancient tarnished gold coin stamped with a faceless headless figure. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 290,
+    "index": 293,
     "key": "relic:curators_brass_key",
     "file": "relic__curators_brass_key.png",
     "rarity": "Epic",
@@ -2619,7 +2646,7 @@
     "prompt": "Game item icon: an ornate antique brass key with a museum-crest bow, faintly gleaming. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 291,
+    "index": 294,
     "key": "relic:the_final_decree",
     "file": "relic__the_final_decree.png",
     "rarity": "Legendary",
@@ -2628,7 +2655,7 @@
     "prompt": "Game item icon: an imperial wax seal on a ribbon, pressed with a signet crest and still glowing warm. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 292,
+    "index": 295,
     "key": "relic:singing_scale",
     "file": "relic__singing_scale.png",
     "rarity": "Rare",
@@ -2637,7 +2664,7 @@
     "prompt": "Game item icon: a single translucent crystal dragon scale ringing with faint sound waves. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 293,
+    "index": 296,
     "key": "relic:bottled_resonance",
     "file": "relic__bottled_resonance.png",
     "rarity": "Epic",
@@ -2646,7 +2673,7 @@
     "prompt": "Game item icon: a corked glass vial holding swirling glowing sound-waves of violet light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 294,
+    "index": 297,
     "key": "relic:shard_of_the_frozen_storm",
     "file": "relic__shard_of_the_frozen_storm.png",
     "rarity": "Legendary",
@@ -2655,7 +2682,7 @@
     "prompt": "Game item icon: a jagged crystal shard with a bolt of golden lightning frozen and crackling inside it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 295,
+    "index": 298,
     "key": "relic:harbormasters_stamp",
     "file": "relic__harbormasters_stamp.png",
     "rarity": "Rare",
@@ -2664,7 +2691,7 @@
     "prompt": "Game item icon: a heavy brass-bound wooden harbormaster's ink stamp dripping blue ink. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 296,
+    "index": 299,
     "key": "relic:bottled_fog",
     "file": "relic__bottled_fog.png",
     "rarity": "Epic",
@@ -2673,7 +2700,7 @@
     "prompt": "Game item icon: a corked glass bottle full of swirling grey harbor fog with a tiny lantern glow inside. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 297,
+    "index": 300,
     "key": "relic:the_return_ticket",
     "file": "relic__the_return_ticket.png",
     "rarity": "Legendary",
@@ -2682,7 +2709,7 @@
     "prompt": "Game item icon: an old unpunched steamship ticket, edges water-stained, faintly glowing gold. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 298,
+    "index": 301,
     "key": "relic:compacted_starlight",
     "file": "relic__compacted_starlight.png",
     "rarity": "Rare",
@@ -2691,7 +2718,7 @@
     "prompt": "Game item icon: a polished shard of glowing blue-white starlight lens, cool light held within. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 299,
+    "index": 302,
     "key": "relic:glassback_plate",
     "file": "relic__glassback_plate.png",
     "rarity": "Epic",
@@ -2700,7 +2727,7 @@
     "prompt": "Game item icon: a faceted plate of black volcanic glass armor with warm orange light in its cracks. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 300,
+    "index": 303,
     "key": "relic:the_still_falling_stone",
     "file": "relic__the_still_falling_stone.png",
     "rarity": "Legendary",
@@ -2709,7 +2736,7 @@
     "prompt": "Game item icon: a dark meteor fragment hovering just above the ground, trailing faint golden falling-star light. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 301,
+    "index": 304,
     "key": "relic:unmelting_rose",
     "file": "relic__unmelting_rose.png",
     "rarity": "Rare",
@@ -2718,7 +2745,7 @@
     "prompt": "Game item icon: a delicate rose sculpted entirely from packed glittering snow. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 302,
+    "index": 305,
     "key": "relic:the_yetis_pencil",
     "file": "relic__the_yetis_pencil.png",
     "rarity": "Epic",
@@ -2727,7 +2754,7 @@
     "prompt": "Game item icon: a stubby well-chewed wooden pencil, oversized and dusted with frost. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 303,
+    "index": 306,
     "key": "relic:grinning_doorknocker",
     "file": "relic__grinning_doorknocker.png",
     "rarity": "Rare",
@@ -2736,7 +2763,7 @@
     "prompt": "Game item icon: an ornate brass door knocker shaped like a grinning face. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 304,
+    "index": 307,
     "key": "relic:jar_of_bottled_dusk",
     "file": "relic__jar_of_bottled_dusk.png",
     "rarity": "Epic",
@@ -2745,7 +2772,7 @@
     "prompt": "Game item icon: a corked jar holding glowing orange October dusk, a tiny jack-o'-lantern light within. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 305,
+    "index": 308,
     "key": "relic:pocketful_of_july",
     "file": "relic__pocketful_of_july.png",
     "rarity": "Rare",
@@ -2754,7 +2781,7 @@
     "prompt": "Game item icon: a small handful of warm amber-gold glass pebbles catching sunlight. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 306,
+    "index": 309,
     "key": "relic:the_free_sample",
     "file": "relic__the_free_sample.png",
     "rarity": "Epic",
@@ -2763,7 +2790,7 @@
     "prompt": "Game item icon: a polished spiral conch shell glowing with soft summer light, faint music rising from it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 307,
+    "index": 310,
     "key": "relic:exact_change_courage",
     "file": "relic__exact_change_courage.png",
     "rarity": "Rare",
@@ -2772,7 +2799,7 @@
     "prompt": "Game item icon: a small engraved brass token stamped with a heart-and-envelope crest. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 308,
+    "index": 311,
     "key": "relic:the_unclaimed_velvet_box",
     "file": "relic__the_unclaimed_velvet_box.png",
     "rarity": "Epic",
@@ -2781,7 +2808,7 @@
     "prompt": "Game item icon: an open red velvet ring box holding a softly glowing gold ring. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 309,
+    "index": 312,
     "key": "relic:tundra_trackers_compass",
     "file": "relic__tundra_trackers_compass.png",
     "rarity": "Rare",
@@ -2790,7 +2817,7 @@
     "prompt": "Game item icon: a worn brass compass with a glowing needle and frost on its glass. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 310,
+    "index": 313,
     "key": "relic:sliver_of_the_white_stag",
     "file": "relic__sliver_of_the_white_stag.png",
     "rarity": "Epic",
@@ -2799,7 +2826,7 @@
     "prompt": "Game item icon: a sliver of pale antler carved with frost patterns, radiating faint cold blue light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 311,
+    "index": 314,
     "key": "achievement:first_steps",
     "file": "achievement__first_steps.png",
     "rarity": "Common",
@@ -2808,7 +2835,7 @@
     "prompt": "Achievement badge icon: a small stack of three gold coins beside a single green banknote, a modest first fortune. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 312,
+    "index": 315,
     "key": "achievement:clean_record",
     "file": "achievement__clean_record.png",
     "rarity": "Uncommon",
@@ -2817,7 +2844,7 @@
     "prompt": "Achievement badge icon: a white dove in flight carrying a green olive sprig over a blank rolled parchment scroll. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 313,
+    "index": 316,
     "key": "achievement:miner_gold",
     "file": "achievement__miner_gold.png",
     "rarity": "Rare",
@@ -2826,7 +2853,7 @@
     "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw gold nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 314,
+    "index": 317,
     "key": "achievement:level_100",
     "file": "achievement__level_100.png",
     "rarity": "Legendary",
@@ -2835,7 +2862,7 @@
     "prompt": "Achievement badge icon: a laurel-wreathed star with five points radiating light beams, a legend's crest. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 315,
+    "index": 318,
     "key": "achievement:century",
     "file": "achievement__century.png",
     "rarity": "Legendary",
@@ -2844,7 +2871,7 @@
     "prompt": "Achievement badge icon: a tall roaring flame rising from a golden torch, embers swirling around it like an unbroken streak. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 316,
+    "index": 319,
     "key": "achievement:completionist",
     "file": "achievement__completionist.png",
     "rarity": "Legendary",
@@ -2853,7 +2880,7 @@
     "prompt": "Achievement badge icon: a radiant rainbow prism crystal refracting light into a full spectrum of beams, ringed by small shining stars. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 317,
+    "index": 320,
     "key": "achievement:unstoppable",
     "file": "achievement__unstoppable.png",
     "rarity": "Legendary",
@@ -2862,7 +2889,7 @@
     "prompt": "Achievement badge icon: a crackling golden lightning bolt striking through an unbroken ring of fire. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 318,
+    "index": 321,
     "key": "achievement:apex_predator",
     "file": "achievement__apex_predator.png",
     "rarity": "Legendary",
@@ -2871,7 +2898,7 @@
     "prompt": "Achievement badge icon: a snarling alpha wolf head with glowing amber eyes above a pair of crossed hunting spears. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 319,
+    "index": 322,
     "key": "achievement:fishing_legend",
     "file": "achievement__fishing_legend.png",
     "rarity": "Legendary",
@@ -2880,7 +2907,7 @@
     "prompt": "Achievement badge icon: a coiled sea dragon with glowing scales rising from a cresting ocean wave, a golden fishhook caught in its fin. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 320,
+    "index": 323,
     "key": "achievement:secret_seeker",
     "file": "achievement__secret_seeker.png",
     "rarity": "Rare",
@@ -2889,7 +2916,7 @@
     "prompt": "Achievement badge icon: a burst of glowing sparkles spilling out of a half-open hidden wooden door set in a mossy stone wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 321,
+    "index": 324,
     "key": "achievement:season_champion",
     "file": "achievement__season_champion.png",
     "rarity": "Legendary",
@@ -2898,7 +2925,7 @@
     "prompt": "Achievement badge icon: a tall gilded champion's trophy cup with twin handles, a ribbon banner and a small crown on top. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 322,
+    "index": 325,
     "key": "achievement:menagerie",
     "file": "achievement__menagerie.png",
     "rarity": "Legendary",
@@ -2907,7 +2934,7 @@
     "prompt": "Achievement badge icon: a jeweled golden pet collar hung with four charms: an eagle feather, a shark tooth, a blue crystal and a tiny amber lantern. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 323,
+    "index": 326,
     "key": "achievement:the_atlas_complete",
     "file": "achievement__the_atlas_complete.png",
     "rarity": "Legendary",
@@ -2916,7 +2943,7 @@
     "prompt": "Achievement badge icon: a large open golden atlas showing a glowing world map scattered with small stars, a crown resting on its pages. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 324,
+    "index": 327,
     "key": "achievement:millionaire",
     "file": "achievement__millionaire.png",
     "rarity": "Rare",
@@ -2925,7 +2952,7 @@
     "prompt": "Achievement badge icon: an overflowing treasure chest with its lid thrown open, heaped with gold coins and gems. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 325,
+    "index": 328,
     "key": "achievement:high_roller",
     "file": "achievement__high_roller.png",
     "rarity": "Rare",
@@ -2934,7 +2961,7 @@
     "prompt": "Achievement badge icon: a pair of golden dice mid-tumble in front of a slot machine lever, lucky sparkles around them. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 326,
+    "index": 329,
     "key": "achievement:social_butterfly",
     "file": "achievement__social_butterfly.png",
     "rarity": "Rare",
@@ -2943,7 +2970,7 @@
     "prompt": "Achievement badge icon: a vivid butterfly whose wings are shaped like colorful overlapping speech bubbles. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 327,
+    "index": 330,
     "key": "achievement:level_50",
     "file": "achievement__level_50.png",
     "rarity": "Rare",
@@ -2952,7 +2979,7 @@
     "prompt": "Achievement badge icon: a shining silver shooting star with a sweeping sparkling comet trail. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 328,
+    "index": 331,
     "key": "achievement:veteran_hunter",
     "file": "achievement__veteran_hunter.png",
     "rarity": "Rare",
@@ -2961,7 +2988,7 @@
     "prompt": "Achievement badge icon: a pair of crossed steel swords over a weathered leather hunter's shield. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 329,
+    "index": 332,
     "key": "achievement:master_hunter",
     "file": "achievement__master_hunter.png",
     "rarity": "Rare",
@@ -2970,7 +2997,7 @@
     "prompt": "Achievement badge icon: a proud stag head with a huge crown of antlers above a curled brass hunting horn. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 330,
+    "index": 333,
     "key": "achievement:trophy_collector",
     "file": "achievement__trophy_collector.png",
     "rarity": "Rare",
@@ -2979,7 +3006,7 @@
     "prompt": "Achievement badge icon: a mounted wooden trophy plaque displaying a single curled ram horn. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 331,
+    "index": 334,
     "key": "achievement:trophy_wall",
     "file": "achievement__trophy_wall.png",
     "rarity": "Rare",
@@ -2988,7 +3015,7 @@
     "prompt": "Achievement badge icon: a wooden wall display with three mounted trophies side by side: a bear claw, a deer antler and a boar tusk. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 332,
+    "index": 335,
     "key": "achievement:master_angler",
     "file": "achievement__master_angler.png",
     "rarity": "Rare",
@@ -2997,7 +3024,7 @@
     "prompt": "Achievement badge icon: a bright tropical fish leaping over a crossed fishing rod and landing net. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 333,
+    "index": 336,
     "key": "achievement:legendary_catch",
     "file": "achievement__legendary_catch.png",
     "rarity": "Rare",
@@ -3006,7 +3033,7 @@
     "prompt": "Achievement badge icon: a huge blue whale breaching from the waves with a taut fishing line trailing from its mouth. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 334,
+    "index": 337,
     "key": "achievement:legendary_obsession",
     "file": "achievement__legendary_obsession.png",
     "rarity": "Rare",
@@ -3015,7 +3042,7 @@
     "prompt": "Achievement badge icon: a swirling ocean wave curling around a glowing golden fish. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 335,
+    "index": 338,
     "key": "achievement:devoted",
     "file": "achievement__devoted.png",
     "rarity": "Rare",
@@ -3024,7 +3051,7 @@
     "prompt": "Achievement badge icon: a blank calendar page covered in a column of red check marks with a small flame burning on top. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 336,
+    "index": 339,
     "key": "achievement:quest_veteran",
     "file": "achievement__quest_veteran.png",
     "rarity": "Rare",
@@ -3033,7 +3060,7 @@
     "prompt": "Achievement badge icon: a rolled-open treasure map with a red dashed trail ending at an X, a brass compass resting on it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 337,
+    "index": 340,
     "key": "achievement:quest_champion",
     "file": "achievement__quest_champion.png",
     "rarity": "Rare",
@@ -3042,7 +3069,7 @@
     "prompt": "Achievement badge icon: an ornate ancient amphora urn painted with adventure scenes, laurel leaves wrapped around its handles. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 338,
+    "index": 341,
     "key": "achievement:apex_companion",
     "file": "achievement__apex_companion.png",
     "rarity": "Rare",
@@ -3051,7 +3078,7 @@
     "prompt": "Achievement badge icon: a glowing paw print at the heart of a rising starburst, evolution sparkles spiraling upward around it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 339,
+    "index": 342,
     "key": "achievement:pet_champion",
     "file": "achievement__pet_champion.png",
     "rarity": "Rare",
@@ -3060,7 +3087,7 @@
     "prompt": "Achievement badge icon: a paw print emblazoned on a small gold battle shield with two crossed swords behind it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 340,
+    "index": 343,
     "key": "achievement:inseparable",
     "file": "achievement__inseparable.png",
     "rarity": "Rare",
@@ -3069,7 +3096,7 @@
     "prompt": "Achievement badge icon: a bright red heart with a small paw print on it, tied with a ribbon bow. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 341,
+    "index": 344,
     "key": "achievement:hunter_gold",
     "file": "achievement__hunter_gold.png",
     "rarity": "Rare",
@@ -3078,7 +3105,7 @@
     "prompt": "Achievement badge icon: a crossed pair of wooden hunting bows behind a large gold arrowhead trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 342,
+    "index": 345,
     "key": "achievement:angler_gold",
     "file": "achievement__angler_gold.png",
     "rarity": "Rare",
@@ -3087,7 +3114,7 @@
     "prompt": "Achievement badge icon: a crossed pair of fishing rods behind a large gold fish-shaped trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 343,
+    "index": 346,
     "key": "achievement:gambler_gold",
     "file": "achievement__gambler_gold.png",
     "rarity": "Rare",
@@ -3096,7 +3123,7 @@
     "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large gold poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 344,
+    "index": 347,
     "key": "achievement:no_blank_spaces",
     "file": "achievement__no_blank_spaces.png",
     "rarity": "Rare",
@@ -3105,7 +3132,7 @@
     "prompt": "Achievement badge icon: an unrolled parchment map completely filled in with forests, mountains and rivers, a quill pen resting on it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 345,
+    "index": 348,
     "key": "achievement:keeper_of_secrets",
     "file": "achievement__keeper_of_secrets.png",
     "rarity": "Rare",
@@ -3114,7 +3141,7 @@
     "prompt": "Achievement badge icon: an ornate antique skeleton key whose bow holds a glowing keyhole-shaped gem. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 346,
+    "index": 349,
     "key": "achievement:first_message",
     "file": "achievement__first_message.png",
     "rarity": "Common",
@@ -3123,7 +3150,7 @@
     "prompt": "Achievement badge icon: a single small white speech bubble with three dots inside, a tiny sparkle at its corner. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 347,
+    "index": 350,
     "key": "achievement:chatty",
     "file": "achievement__chatty.png",
     "rarity": "Common",
@@ -3132,7 +3159,7 @@
     "prompt": "Achievement badge icon: two overlapping speech bubbles, one blue and one white, bouncing off each other. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 348,
+    "index": 351,
     "key": "achievement:level_10",
     "file": "achievement__level_10.png",
     "rarity": "Common",
@@ -3141,7 +3168,7 @@
     "prompt": "Achievement badge icon: a single bright yellow star rising on a short upward arrow, a small sparkle beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 349,
+    "index": 352,
     "key": "achievement:first_blood",
     "file": "achievement__first_blood.png",
     "rarity": "Common",
@@ -3150,7 +3177,7 @@
     "prompt": "Achievement badge icon: a single wooden hunting arrow with a red fletching stuck in a round straw target. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 350,
+    "index": 353,
     "key": "achievement:gone_fishing",
     "file": "achievement__gone_fishing.png",
     "rarity": "Common",
@@ -3159,7 +3186,7 @@
     "prompt": "Achievement badge icon: a bobbing red-and-white fishing float on a calm blue ripple, a thin line rising out of frame. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 351,
+    "index": 354,
     "key": "achievement:first_footsteps",
     "file": "achievement__first_footsteps.png",
     "rarity": "Common",
@@ -3168,7 +3195,7 @@
     "prompt": "Achievement badge icon: a single worn leather hiking boot beside a trail of three small footprints in the dirt. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 352,
+    "index": 355,
     "key": "achievement:first_companion",
     "file": "achievement__first_companion.png",
     "rarity": "Common",
@@ -3177,7 +3204,7 @@
     "prompt": "Achievement badge icon: a single brown paw print inside a small heart-shaped name tag on a red collar loop. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 353,
+    "index": 356,
     "key": "achievement:lucky",
     "file": "achievement__lucky.png",
     "rarity": "Common",
@@ -3186,7 +3213,7 @@
     "prompt": "Achievement badge icon: a single green four-leaf clover resting on a white six-sided die. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 354,
+    "index": 357,
     "key": "achievement:petty_thief",
     "file": "achievement__petty_thief.png",
     "rarity": "Common",
@@ -3195,7 +3222,7 @@
     "prompt": "Achievement badge icon: a small brown coin pouch with a single gold coin slipping out, a black eye-mask lying beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 355,
+    "index": 358,
     "key": "achievement:hunter_bronze",
     "file": "achievement__hunter_bronze.png",
     "rarity": "Common",
@@ -3204,7 +3231,7 @@
     "prompt": "Achievement badge icon: a crossed pair of wooden hunting bows behind a large bronze arrowhead trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 356,
+    "index": 359,
     "key": "achievement:angler_bronze",
     "file": "achievement__angler_bronze.png",
     "rarity": "Common",
@@ -3213,7 +3240,7 @@
     "prompt": "Achievement badge icon: a crossed pair of fishing rods behind a large bronze fish-shaped trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 357,
+    "index": 360,
     "key": "achievement:miner_bronze",
     "file": "achievement__miner_bronze.png",
     "rarity": "Common",
@@ -3222,7 +3249,7 @@
     "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw bronze nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 358,
+    "index": 361,
     "key": "achievement:gambler_bronze",
     "file": "achievement__gambler_bronze.png",
     "rarity": "Common",
@@ -3231,7 +3258,7 @@
     "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large bronze poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 359,
+    "index": 362,
     "key": "achievement:chatterbox",
     "file": "achievement__chatterbox.png",
     "rarity": "Uncommon",
@@ -3240,7 +3267,7 @@
     "prompt": "Achievement badge icon: a brass megaphone blasting a burst of colorful speech bubbles. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 360,
+    "index": 363,
     "key": "achievement:level_25",
     "file": "achievement__level_25.png",
     "rarity": "Uncommon",
@@ -3249,7 +3276,7 @@
     "prompt": "Achievement badge icon: two stacked golden stars on a small blue chevron rank insignia. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 361,
+    "index": 364,
     "key": "achievement:seasoned_hunter",
     "file": "achievement__seasoned_hunter.png",
     "rarity": "Uncommon",
@@ -3258,7 +3285,7 @@
     "prompt": "Achievement badge icon: a leather quiver packed with feathered arrows, a curved hunting dagger strapped to its side. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 362,
+    "index": 365,
     "key": "achievement:weekend_angler",
     "file": "achievement__weekend_angler.png",
     "rarity": "Uncommon",
@@ -3267,7 +3294,7 @@
     "prompt": "Achievement badge icon: a wicker fishing creel basket with its lid open and a fish tail poking out, a fishing hook hanging beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 363,
+    "index": 366,
     "key": "achievement:angler_pro",
     "file": "achievement__angler_pro.png",
     "rarity": "Uncommon",
@@ -3276,7 +3303,7 @@
     "prompt": "Achievement badge icon: a sleek fishing reel spinning with a taut line, a silver fish leaping beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 364,
+    "index": 367,
     "key": "achievement:week_warrior",
     "file": "achievement__week_warrior.png",
     "rarity": "Uncommon",
@@ -3285,7 +3312,7 @@
     "prompt": "Achievement badge icon: a small torn calendar page with a row of check marks, a small flame flickering above it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 365,
+    "index": 368,
     "key": "achievement:fortnight",
     "file": "achievement__fortnight.png",
     "rarity": "Uncommon",
@@ -3294,7 +3321,7 @@
     "prompt": "Achievement badge icon: a bright full moon behind two small calendar pages side by side, a small flame between them. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 366,
+    "index": 369,
     "key": "achievement:quest_novice",
     "file": "achievement__quest_novice.png",
     "rarity": "Uncommon",
@@ -3303,7 +3330,7 @@
     "prompt": "Achievement badge icon: a rolled parchment quest scroll tied with a red ribbon and sealed with a wax stamp. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 367,
+    "index": 370,
     "key": "achievement:coin_hoarder",
     "file": "achievement__coin_hoarder.png",
     "rarity": "Uncommon",
@@ -3312,7 +3339,7 @@
     "prompt": "Achievement badge icon: a round clay piggy bank stuffed with gold coins, one coin balanced on the slot. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 368,
+    "index": 371,
     "key": "achievement:wealthy",
     "file": "achievement__wealthy.png",
     "rarity": "Uncommon",
@@ -3321,7 +3348,7 @@
     "prompt": "Achievement badge icon: a large faceted blue diamond resting on a tidy stack of gold bars. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 369,
+    "index": 372,
     "key": "achievement:gambler",
     "file": "achievement__gambler.png",
     "rarity": "Uncommon",
@@ -3330,7 +3357,7 @@
     "prompt": "Achievement badge icon: a fanned hand of playing cards showing a royal flush, a tall stack of poker chips beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 370,
+    "index": 373,
     "key": "achievement:thief",
     "file": "achievement__thief.png",
     "rarity": "Uncommon",
@@ -3339,7 +3366,7 @@
     "prompt": "Achievement badge icon: a sly masked raccoon clutching a stolen gold coin to its chest. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 371,
+    "index": 374,
     "key": "achievement:robber_baron",
     "file": "achievement__robber_baron.png",
     "rarity": "Uncommon",
@@ -3348,7 +3375,7 @@
     "prompt": "Achievement badge icon: a black top hat with a purple band beside a bulging sack of loot marked with a coin symbol. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 372,
+    "index": 375,
     "key": "achievement:wayfarer",
     "file": "achievement__wayfarer.png",
     "rarity": "Uncommon",
@@ -3357,7 +3384,7 @@
     "prompt": "Achievement badge icon: a brass compass with its lid open, lying on a folded trail map beside a walking staff. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 373,
+    "index": 376,
     "key": "achievement:four_corners",
     "file": "achievement__four_corners.png",
     "rarity": "Uncommon",
@@ -3366,7 +3393,7 @@
     "prompt": "Achievement badge icon: a round world map divided into five colored regions, a small flag planted in each one. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 374,
+    "index": 377,
     "key": "achievement:loremonger",
     "file": "achievement__loremonger.png",
     "rarity": "Uncommon",
@@ -3375,7 +3402,7 @@
     "prompt": "Achievement badge icon: a leather-bound journal bursting with loose torn parchment pages, a quill tucked in its spine. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 375,
+    "index": 378,
     "key": "achievement:relic_runner",
     "file": "achievement__relic_runner.png",
     "rarity": "Uncommon",
@@ -3384,7 +3411,7 @@
     "prompt": "Achievement badge icon: an ancient clay urn with painted glyphs carried in a rope sling, dust puffing around it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 376,
+    "index": 379,
     "key": "achievement:trap_connoisseur",
     "file": "achievement__trap_connoisseur.png",
     "rarity": "Uncommon",
@@ -3393,7 +3420,7 @@
     "prompt": "Achievement badge icon: a sprung iron jaw trap with a small bandage stuck on one tooth and a crumpled receipt beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 377,
+    "index": 380,
     "key": "achievement:full_house",
     "file": "achievement__full_house.png",
     "rarity": "Uncommon",
@@ -3402,7 +3429,7 @@
     "prompt": "Achievement badge icon: a cozy little wooden pet house with three different paw prints on the roof. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 378,
+    "index": 381,
     "key": "achievement:well_fed",
     "file": "achievement__well_fed.png",
     "rarity": "Uncommon",
@@ -3411,7 +3438,7 @@
     "prompt": "Achievement badge icon: a heaping pet food bowl with a meaty bone on top, a small paw print on the bowl. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 379,
+    "index": 382,
     "key": "achievement:hunter_silver",
     "file": "achievement__hunter_silver.png",
     "rarity": "Uncommon",
@@ -3420,7 +3447,7 @@
     "prompt": "Achievement badge icon: a crossed pair of wooden hunting bows behind a large silver arrowhead trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 380,
+    "index": 383,
     "key": "achievement:angler_silver",
     "file": "achievement__angler_silver.png",
     "rarity": "Uncommon",
@@ -3429,7 +3456,7 @@
     "prompt": "Achievement badge icon: a crossed pair of fishing rods behind a large silver fish-shaped trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 381,
+    "index": 384,
     "key": "achievement:miner_silver",
     "file": "achievement__miner_silver.png",
     "rarity": "Uncommon",
@@ -3438,7 +3465,7 @@
     "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw silver nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 382,
+    "index": 385,
     "key": "achievement:gambler_silver",
     "file": "achievement__gambler_silver.png",
     "rarity": "Uncommon",
@@ -3447,7 +3474,7 @@
     "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large silver poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   },
   {
-    "index": 383,
+    "index": 386,
     "key": "fish:fish_scale",
     "file": "fish__fish_scale.png",
     "rarity": "Common",
@@ -3456,7 +3483,7 @@
     "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, plain pearly silver-blue with a soft sheen. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 384,
+    "index": 387,
     "key": "fish:rare_scale",
     "file": "fish__rare_scale.png",
     "rarity": "Uncommon",
@@ -3465,7 +3492,7 @@
     "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, shimmering iridescent teal and violet, a few tiny sparkles at its edge. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 385,
+    "index": 388,
     "key": "fish:mythic_scale",
     "file": "fish__mythic_scale.png",
     "rarity": "Legendary",
@@ -3474,7 +3501,7 @@
     "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, deep cosmic indigo flecked with tiny stars, a faint golden glow along its rim. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 386,
+    "index": 389,
     "key": "fish:seaweed_bundle",
     "file": "fish__seaweed_bundle.png",
     "rarity": "Common",
@@ -3483,7 +3510,7 @@
     "prompt": "Game item icon: a small bundle of glossy green kelp ribbons tied around the middle with a twist of twine. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 387,
+    "index": 390,
     "key": "fish:driftwood",
     "file": "fish__driftwood.png",
     "rarity": "Common",
@@ -3492,7 +3519,7 @@
     "prompt": "Game item icon: a short gnarled piece of sun-bleached driftwood, smooth pale grey wood with a knot hole. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 388,
+    "index": 391,
     "key": "fish:old_coin",
     "file": "fish__old_coin.png",
     "rarity": "Uncommon",
@@ -3501,7 +3528,7 @@
     "prompt": "Game item icon: a single worn antique gold coin, tarnished green at the edges, stamped with a faded ship. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 389,
+    "index": 392,
     "key": "fish:pearl",
     "file": "fish__pearl.png",
     "rarity": "Rare",
@@ -3510,7 +3537,7 @@
     "prompt": "Game item icon: a single lustrous round white pearl resting in a small open oyster shell. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 390,
+    "index": 393,
     "key": "fish:coral_fragment",
     "file": "fish__coral_fragment.png",
     "rarity": "Rare",
@@ -3519,7 +3546,7 @@
     "prompt": "Game item icon: a branching fragment of bright coral-pink coral with a few rounded tips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 391,
+    "index": 394,
     "key": "fish:shark_tooth",
     "file": "fish__shark_tooth.png",
     "rarity": "Epic",
@@ -3528,7 +3555,7 @@
     "prompt": "Game item icon: a single large serrated triangular shark tooth, ivory white with a darker root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 392,
+    "index": 395,
     "key": "fish:tentacle_ink",
     "file": "fish__tentacle_ink.png",
     "rarity": "Epic",
@@ -3537,7 +3564,7 @@
     "prompt": "Game item icon: a small corked glass vial of swirling inky black-purple liquid with a curled purple tentacle wrapped around it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 393,
+    "index": 396,
     "key": "mine:rock_fragment",
     "file": "mine__rock_fragment.png",
     "rarity": "Common",
@@ -3546,7 +3573,7 @@
     "prompt": "Game item icon: a single small broken fragment of plain grey stone with sharp chipped edges and a few speckles. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 394,
+    "index": 397,
     "key": "mine:coal_dust",
     "file": "mine__coal_dust.png",
     "rarity": "Common",
@@ -3555,7 +3582,7 @@
     "prompt": "Game item icon: a small conical heap of fine glittering powder, matte charcoal-black coal dust with a few tiny dark lumps on top. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 395,
+    "index": 398,
     "key": "mine:copper_flake",
     "file": "mine__copper_flake.png",
     "rarity": "Common",
@@ -3564,7 +3591,7 @@
     "prompt": "Game item icon: a single thin curled flake of shiny orange copper metal, its edges tinged with green verdigris. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 396,
+    "index": 399,
     "key": "mine:iron_filing",
     "file": "mine__iron_filing.png",
     "rarity": "Uncommon",
@@ -3573,7 +3600,7 @@
     "prompt": "Game item icon: a little cluster of thin dark grey iron filings and slivers, bristling outward like a tiny hedgehog. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 397,
+    "index": 400,
     "key": "mine:silver_dust",
     "file": "mine__silver_dust.png",
     "rarity": "Uncommon",
@@ -3582,7 +3609,7 @@
     "prompt": "Game item icon: a small conical heap of fine glittering powder, lustrous bright silver dust catching the light. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 398,
+    "index": 401,
     "key": "mine:lead_slug",
     "file": "mine__lead_slug.png",
     "rarity": "Uncommon",
@@ -3591,7 +3618,7 @@
     "prompt": "Game item icon: a single small heavy rounded slug of dull blue-grey lead metal, slightly flattened. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 399,
+    "index": 402,
     "key": "mine:quartz_shard",
     "file": "mine__quartz_shard.png",
     "rarity": "Rare",
@@ -3600,7 +3627,7 @@
     "prompt": "Game item icon: a single clear pointed six-sided quartz crystal shard, pale icy white with a cloudy base. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 400,
+    "index": 403,
     "key": "mine:gold_nugget",
     "file": "mine__gold_nugget.png",
     "rarity": "Rare",
@@ -3609,7 +3636,7 @@
     "prompt": "Game item icon: a single lumpy rounded raw gold nugget, bright warm yellow gold with pitted bumps. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 401,
+    "index": 404,
     "key": "mine:raw_sapphire",
     "file": "mine__raw_sapphire.png",
     "rarity": "Rare",
@@ -3618,7 +3645,7 @@
     "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, deep rich blue sapphire. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 402,
+    "index": 405,
     "key": "mine:amethyst_chip",
     "file": "mine__amethyst_chip.png",
     "rarity": "Rare",
@@ -3627,7 +3654,7 @@
     "prompt": "Game item icon: a single small chipped wedge of purple amethyst crystal with a few tiny pointed crystal tips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 403,
+    "index": 406,
     "key": "mine:topaz_shard",
     "file": "mine__topaz_shard.png",
     "rarity": "Rare",
@@ -3636,7 +3663,7 @@
     "prompt": "Game item icon: a single long pointed shard of warm amber-orange topaz with clean straight facets. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 404,
+    "index": 407,
     "key": "mine:raw_emerald",
     "file": "mine__raw_emerald.png",
     "rarity": "Epic",
@@ -3645,7 +3672,7 @@
     "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, deep forest-green emerald. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 405,
+    "index": 408,
     "key": "mine:raw_ruby",
     "file": "mine__raw_ruby.png",
     "rarity": "Epic",
@@ -3654,7 +3681,7 @@
     "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, blazing ember-red ruby with a faint inner glow. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 406,
+    "index": 409,
     "key": "mine:obsidian_chip",
     "file": "mine__obsidian_chip.png",
     "rarity": "Epic",
@@ -3663,7 +3690,7 @@
     "prompt": "Game item icon: a single razor-sharp chip of glossy black volcanic obsidian glass with curved conchoidal fracture ridges. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 407,
+    "index": 410,
     "key": "mine:platinum_dust",
     "file": "mine__platinum_dust.png",
     "rarity": "Epic",
@@ -3672,7 +3699,7 @@
     "prompt": "Game item icon: a small conical heap of fine glittering powder, pale white-silver platinum dust with a cool dull gleam. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 408,
+    "index": 411,
     "key": "mine:raw_diamond",
     "file": "mine__raw_diamond.png",
     "rarity": "Epic",
@@ -3681,7 +3708,7 @@
     "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, icy clear-white diamond scattering tiny sparkles. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 409,
+    "index": 412,
     "key": "mine:crystal_sliver",
     "file": "mine__crystal_sliver.png",
     "rarity": "Legendary",
@@ -3690,7 +3717,7 @@
     "prompt": "Game item icon: a single thin jagged sliver of near-black dark crystal with a deep violet edge glow, seeming to swallow the light around it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 410,
+    "index": 413,
     "key": "mine:mythril_dust",
     "file": "mine__mythril_dust.png",
     "rarity": "Legendary",
@@ -3699,7 +3726,7 @@
     "prompt": "Game item icon: a small conical heap of fine glittering powder, shimmering pale mint-silver mythril dust with a soft magical glow. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 411,
+    "index": 414,
     "key": "mine:zenith_essence",
     "file": "mine__zenith_essence.png",
     "rarity": "Legendary",
@@ -3708,7 +3735,7 @@
     "prompt": "Game item icon: a small corked glass vial of glowing liquid starlight, pale gold and white, with a tiny star sparkle inside. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 412,
+    "index": 415,
     "key": "mine:primordial_ash",
     "file": "mine__primordial_ash.png",
     "rarity": "Legendary",
@@ -3717,7 +3744,7 @@
     "prompt": "Game item icon: a small smouldering heap of dark grey volcanic ash with glowing molten-orange embers and a wisp of heat shimmer. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 413,
+    "index": 416,
     "key": "mine:stardust",
     "file": "mine__stardust.png",
     "rarity": "Legendary",
@@ -3726,7 +3753,7 @@
     "prompt": "Game item icon: a small swirl of glittering cosmic stardust in deep blue and gold, sprinkled with tiny four-pointed stars. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 414,
+    "index": 417,
     "key": "mine:void_essence",
     "file": "mine__void_essence.png",
     "rarity": "Legendary",
@@ -3735,7 +3762,7 @@
     "prompt": "Game item icon: a small floating orb of swirling void energy, inky black at the core with a violet rim and tiny drifting specks. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 415,
+    "index": 418,
     "key": "hunt:badger_pelt",
     "file": "hunt__badger_pelt.png",
     "rarity": "Uncommon",
@@ -3744,7 +3771,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, coarse grey fur with a bold black-and-white striped head flap. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 416,
+    "index": 419,
     "key": "hunt:beaver_pelt",
     "file": "hunt__beaver_pelt.png",
     "rarity": "Uncommon",
@@ -3753,7 +3780,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, glossy dense chestnut-brown fur. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 417,
+    "index": 420,
     "key": "hunt:wolf_pelt",
     "file": "hunt__wolf_pelt.png",
     "rarity": "Rare",
@@ -3762,7 +3789,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, thick shaggy grey wolf fur with a paler cream belly. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 418,
+    "index": 421,
     "key": "hunt:spirit_pelt",
     "file": "hunt__spirit_pelt.png",
     "rarity": "Legendary",
@@ -3771,7 +3798,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, ghostly pale blue-white snow leopard fur with dark rosette spots, a faint spectral glow and wisps of frost drifting off it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 419,
+    "index": 422,
     "key": "hunt:striped_pelt",
     "file": "hunt__striped_pelt.png",
     "rarity": "Common",
@@ -3780,7 +3807,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, tiny tawny-orange chipmunk fur with dark and cream stripes down its length. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 420,
+    "index": 423,
     "key": "hunt:opossum_pelt",
     "file": "hunt__opossum_pelt.png",
     "rarity": "Common",
@@ -3789,7 +3816,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, scruffy pale grey-white opossum fur with a bare pink tail flap. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 421,
+    "index": 424,
     "key": "hunt:sand_pelt",
     "file": "hunt__sand_pelt.png",
     "rarity": "Uncommon",
@@ -3798,7 +3825,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, soft sandy-cream fennec fox fur with a white belly. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 422,
+    "index": 425,
     "key": "hunt:arctic_fox_pelt",
     "file": "hunt__arctic_fox_pelt.png",
     "rarity": "Rare",
@@ -3807,7 +3834,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, pristine fluffy snow-white arctic fox fur. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 423,
+    "index": 426,
     "key": "hunt:shadow_pelt",
     "file": "hunt__shadow_pelt.png",
     "rarity": "Epic",
@@ -3816,7 +3843,7 @@
     "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, sleek jet-black panther fur with a faint purple sheen. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 424,
+    "index": 427,
     "key": "hunt:thick_hide",
     "file": "hunt__thick_hide.png",
     "rarity": "Epic",
@@ -3825,7 +3852,7 @@
     "prompt": "Game item icon: a single heavy folded slab of thick shaggy dark-brown musk ox hide with long coarse fur hanging from its edge. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 425,
+    "index": 428,
     "key": "hunt:gator_hide",
     "file": "hunt__gator_hide.png",
     "rarity": "Epic",
@@ -3834,7 +3861,7 @@
     "prompt": "Game item icon: a single folded slab of tough olive-green alligator hide covered in raised bumpy armored scutes. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 426,
+    "index": 429,
     "key": "hunt:slick_skin",
     "file": "hunt__slick_skin.png",
     "rarity": "Common",
@@ -3843,7 +3870,7 @@
     "prompt": "Game item icon: a single small glossy limp strip of bright green frog skin with darker spots and a wet shine. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 427,
+    "index": 430,
     "key": "hunt:wolverine_fur",
     "file": "hunt__wolverine_fur.png",
     "rarity": "Legendary",
@@ -3852,7 +3879,7 @@
     "prompt": "Game item icon: a single thick tuft of dark brown wolverine fur with a tan stripe, tied at the base with a twist of cord. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 428,
+    "index": 431,
     "key": "hunt:golden_fur",
     "file": "hunt__golden_fur.png",
     "rarity": "Legendary",
@@ -3861,7 +3888,7 @@
     "prompt": "Game item icon: a single thick tuft of shimmering golden fox fur tied at the base with a twist of cord, glowing softly with tiny sparkles. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 429,
+    "index": 432,
     "key": "hunt:swamp_scale",
     "file": "hunt__swamp_scale.png",
     "rarity": "Uncommon",
@@ -3870,7 +3897,7 @@
     "prompt": "Game item icon: a single large rounded scale, dark murky green with olive spots and a wet gleam. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 430,
+    "index": 433,
     "key": "hunt:feather",
     "file": "hunt__feather.png",
     "rarity": "Common",
@@ -3879,7 +3906,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, plain clean white dove feather. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 431,
+    "index": 434,
     "key": "hunt:down_feather",
     "file": "hunt__down_feather.png",
     "rarity": "Common",
@@ -3888,7 +3915,7 @@
     "prompt": "Game item icon: a single small fluffy soft down feather, pale grey-brown and wispy. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 432,
+    "index": 435,
     "key": "hunt:crow_feather",
     "file": "hunt__crow_feather.png",
     "rarity": "Common",
@@ -3897,7 +3924,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, glossy jet-black crow feather with a blue-purple sheen. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 433,
+    "index": 436,
     "key": "hunt:scavenger_feather",
     "file": "hunt__scavenger_feather.png",
     "rarity": "Uncommon",
@@ -3906,7 +3933,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, dusty dark brown vulture feather with a ragged tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 434,
+    "index": 437,
     "key": "hunt:snowy_feather",
     "file": "hunt__snowy_feather.png",
     "rarity": "Rare",
@@ -3915,7 +3942,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, soft white snowy owl feather with small black flecks. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 435,
+    "index": 438,
     "key": "hunt:marsh_feather",
     "file": "hunt__marsh_feather.png",
     "rarity": "Uncommon",
@@ -3924,7 +3951,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, pale blue-grey crane feather with a darker grey tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 436,
+    "index": 439,
     "key": "hunt:storm_feather",
     "file": "hunt__storm_feather.png",
     "rarity": "Legendary",
@@ -3933,7 +3960,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, slate-grey storm hawk feather crackling with small blue lightning sparks along its edge. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 437,
+    "index": 440,
     "key": "hunt:thunderfeather",
     "file": "hunt__thunderfeather.png",
     "rarity": "Legendary",
@@ -3942,7 +3969,7 @@
     "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, huge golden thunderbird feather with electric blue edges and a bolt of lightning running down its spine, glowing brightly. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 438,
+    "index": 441,
     "key": "hunt:coyote_fang",
     "file": "hunt__coyote_fang.png",
     "rarity": "Rare",
@@ -3951,7 +3978,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, plain ivory white. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 439,
+    "index": 442,
     "key": "hunt:lynx_fang",
     "file": "hunt__lynx_fang.png",
     "rarity": "Rare",
@@ -3960,7 +3987,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, slender and sharp, cream white. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 440,
+    "index": 443,
     "key": "hunt:hyena_fang",
     "file": "hunt__hyena_fang.png",
     "rarity": "Rare",
@@ -3969,7 +3996,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, thick and chipped, yellowed bone colour. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 441,
+    "index": 444,
     "key": "hunt:saber_fang",
     "file": "hunt__saber_fang.png",
     "rarity": "Epic",
@@ -3978,7 +4005,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, huge and saber-long, ancient ivory with frost crusted at the root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 442,
+    "index": 445,
     "key": "hunt:dire_wolf_fang",
     "file": "hunt__dire_wolf_fang.png",
     "rarity": "Epic",
@@ -3987,7 +4014,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, large and jagged, bone white with a faint red glow at the root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 443,
+    "index": 446,
     "key": "hunt:ember_fang",
     "file": "hunt__ember_fang.png",
     "rarity": "Legendary",
@@ -3996,7 +4023,7 @@
     "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, ashen grey with glowing molten-orange cracks and a small flame flickering at the tip. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 444,
+    "index": 447,
     "key": "hunt:lion_tooth",
     "file": "hunt__lion_tooth.png",
     "rarity": "Legendary",
@@ -4005,7 +4032,7 @@
     "prompt": "Game item icon: a single large pointed lion canine tooth, warm ivory with a tawny root wrapped in a band of brown leather. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 445,
+    "index": 448,
     "key": "hunt:bear_claw",
     "file": "hunt__bear_claw.png",
     "rarity": "Epic",
@@ -4014,7 +4041,7 @@
     "prompt": "Game item icon: a single large hooked claw curving to a sharp point, dark charcoal-grey black bear claw with a lighter slate-grey edge. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 446,
+    "index": 449,
     "key": "hunt:ancient_claw",
     "file": "hunt__ancient_claw.png",
     "rarity": "Legendary",
@@ -4023,7 +4050,7 @@
     "prompt": "Game item icon: a single large hooked claw curving to a sharp point, enormous fossilised prehistoric claw in dark brown stone, cracked and glowing with faint violet runes. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 447,
+    "index": 450,
     "key": "hunt:polar_claw",
     "file": "hunt__polar_claw.png",
     "rarity": "Epic",
@@ -4032,7 +4059,7 @@
     "prompt": "Game item icon: a single large hooked claw curving to a sharp point, creamy white polar bear claw tipped with frost. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 448,
+    "index": 451,
     "key": "hunt:primal_claw",
     "file": "hunt__primal_claw.png",
     "rarity": "Epic",
@@ -4041,7 +4068,7 @@
     "prompt": "Game item icon: a single large hooked claw curving to a sharp point, battle-scarred dark grey claw with deep notches and a blood-red tip. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 449,
+    "index": 452,
     "key": "hunt:scorpion_claw",
     "file": "hunt__scorpion_claw.png",
     "rarity": "Uncommon",
@@ -4050,7 +4077,7 @@
     "prompt": "Game item icon: a single large scorpion pincer claw, glossy amber-orange armored shell with a dark tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 450,
+    "index": 453,
     "key": "hunt:eagle_talon",
     "file": "hunt__eagle_talon.png",
     "rarity": "Epic",
@@ -4059,7 +4086,7 @@
     "prompt": "Game item icon: a single curved golden-yellow eagle foot talon gripping inward, with sharp black claw tips. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 451,
+    "index": 454,
     "key": "hunt:spectral_bone",
     "file": "hunt__spectral_bone.png",
     "rarity": "Legendary",
@@ -4068,7 +4095,7 @@
     "prompt": "Game item icon: a single translucent glowing pale-blue ghostly bone with silver moonlight wisps drifting off it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 452,
+    "index": 455,
     "key": "hunt:antler_fragment",
     "file": "hunt__antler_fragment.png",
     "rarity": "Uncommon",
@@ -4077,7 +4104,7 @@
     "prompt": "Game item icon: a single short broken piece of tan deer antler with one pointed tine and a jagged snapped end. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 453,
+    "index": 456,
     "key": "hunt:elk_antler",
     "file": "hunt__elk_antler.png",
     "rarity": "Rare",
@@ -4086,7 +4113,7 @@
     "prompt": "Game item icon: a single branching antler with several pointed tines, large tan-brown elk antler. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 454,
+    "index": 457,
     "key": "hunt:caribou_antler",
     "file": "hunt__caribou_antler.png",
     "rarity": "Rare",
@@ -4095,7 +4122,7 @@
     "prompt": "Game item icon: a single branching antler with several pointed tines, pale tan caribou antler caked in white frost. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 455,
+    "index": 458,
     "key": "hunt:obsidian_antler",
     "file": "hunt__obsidian_antler.png",
     "rarity": "Legendary",
@@ -4104,7 +4131,7 @@
     "prompt": "Game item icon: a single branching antler with several pointed tines, jet-black volcanic obsidian glass antler with sharp glossy facets and a faint molten-red glow in the cracks. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 456,
+    "index": 459,
     "key": "hunt:moose_rack",
     "file": "hunt__moose_rack.png",
     "rarity": "Epic",
@@ -4113,7 +4140,7 @@
     "prompt": "Game item icon: a single wide flat palmate moose antler with a broad paddle and pointed tines along its edge, warm tan-brown. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 457,
+    "index": 460,
     "key": "hunt:megaloceros_crown",
     "file": "hunt__megaloceros_crown.png",
     "rarity": "Legendary",
@@ -4122,7 +4149,7 @@
     "prompt": "Game item icon: a huge sweeping pair of giant elk antlers forming a crown, ancient bone-white with gold tips and crackling lightning glow. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 458,
+    "index": 461,
     "key": "hunt:mountain_horn",
     "file": "hunt__mountain_horn.png",
     "rarity": "Epic",
@@ -4131,7 +4158,7 @@
     "prompt": "Game item icon: a single thick ridged horn sweeping back into a curl, pale cream-grey mountain goat horn. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 459,
+    "index": 462,
     "key": "hunt:ram_horn",
     "file": "hunt__ram_horn.png",
     "rarity": "Rare",
@@ -4140,7 +4167,7 @@
     "prompt": "Game item icon: a single thick ridged horn sweeping back into a curl, massive battle-scarred dark brown ram horn with deep chips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 460,
+    "index": 463,
     "key": "hunt:tusk_shard",
     "file": "hunt__tusk_shard.png",
     "rarity": "Uncommon",
@@ -4149,7 +4176,7 @@
     "prompt": "Game item icon: a single small broken shard of ivory boar tusk with a jagged snapped end. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 461,
+    "index": 464,
     "key": "hunt:hog_tusk",
     "file": "hunt__hog_tusk.png",
     "rarity": "Uncommon",
@@ -4158,7 +4185,7 @@
     "prompt": "Game item icon: a single smooth curved tusk arcing upward to a blunt point, short mud-stained yellowed hog tusk. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 462,
+    "index": 465,
     "key": "hunt:mammoth_tusk",
     "file": "hunt__mammoth_tusk.png",
     "rarity": "Epic",
@@ -4167,7 +4194,7 @@
     "prompt": "Game item icon: a single smooth curved tusk arcing upward to a blunt point, huge long ivory mammoth tusk with a crust of blue ice along its curve. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 463,
+    "index": 466,
     "key": "hunt:rabbits_foot",
     "file": "hunt__rabbits_foot.png",
     "rarity": "Common",
@@ -4176,7 +4203,7 @@
     "prompt": "Game item icon: a single furry lucky animal foot charm hanging from a small gold ring, soft white cottontail rabbit fur. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 464,
+    "index": 467,
     "key": "hunt:jackrabbit_foot",
     "file": "hunt__jackrabbit_foot.png",
     "rarity": "Uncommon",
@@ -4185,7 +4212,7 @@
     "prompt": "Game item icon: a single furry lucky animal foot charm hanging from a small gold ring, long sandy-brown jackrabbit fur. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 465,
+    "index": 468,
     "key": "hunt:venom_sac",
     "file": "hunt__venom_sac.png",
     "rarity": "Rare",
@@ -4194,7 +4221,7 @@
     "prompt": "Game item icon: a single small plump translucent sac of glowing yellow-green venom with a fang-shaped tip. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 466,
+    "index": 469,
     "key": "hunt:swamp_gland",
     "file": "hunt__swamp_gland.png",
     "rarity": "Rare",
@@ -4203,7 +4230,7 @@
     "prompt": "Game item icon: a single small slimy bulbous gland, murky green and toxic purple, oozing a few bubbles. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 467,
+    "index": 470,
     "key": "hunt:cottonmouth_venom",
     "file": "hunt__cottonmouth_venom.png",
     "rarity": "Rare",
@@ -4212,7 +4239,7 @@
     "prompt": "Game item icon: a small corked glass vial of glowing liquid, milky white venom with a dark olive snake coiled around it. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 468,
+    "index": 471,
     "key": "hunt:acorn_cache",
     "file": "hunt__acorn_cache.png",
     "rarity": "Common",
@@ -4221,7 +4248,7 @@
     "prompt": "Game item icon: a small pile of plump brown acorns with their little caps, a few loose leaves tucked in. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 469,
+    "index": 472,
     "key": "hunt:hardwood_chip",
     "file": "hunt__hardwood_chip.png",
     "rarity": "Common",
@@ -4230,7 +4257,7 @@
     "prompt": "Game item icon: a single chunky splintered chip of dark oak hardwood with visible grain and a small peck hole. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 470,
+    "index": 473,
     "key": "hunt:bandit_mask",
     "file": "hunt__bandit_mask.png",
     "rarity": "Legendary",
@@ -4239,7 +4266,7 @@
     "prompt": "Game item icon: a small black raccoon bandit eye mask made of grey-and-black striped fur. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 471,
+    "index": 474,
     "key": "hunt:spirit_essence",
     "file": "hunt__spirit_essence.png",
     "rarity": "Legendary",
@@ -4248,7 +4275,7 @@
     "prompt": "Game item icon: a small floating orb of glowing spectral wolf spirit energy, pale white-blue with aurora-green swirls. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 472,
+    "index": 475,
     "key": "hunt:ancient_relic",
     "file": "hunt__ancient_relic.png",
     "rarity": "Rare",
@@ -4257,7 +4284,7 @@
     "prompt": "Game item icon: a small weathered stone idol carved with worn glowing rune marks, mossy grey stone. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 473,
+    "index": 476,
     "key": "explore:survey_chalk",
     "file": "explore__survey_chalk.png",
     "rarity": "Common",
@@ -4266,7 +4293,7 @@
     "prompt": "Game item icon: a single short squared stick of white surveyor's chalk, worn down at one end, with a small dusting of chalk powder. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 474,
+    "index": 477,
     "key": "explore:pressed_fern",
     "file": "explore__pressed_fern.png",
     "rarity": "Common",
@@ -4275,7 +4302,7 @@
     "prompt": "Game item icon: a single flat pressed fern frond, dried soft sage green with a slightly faded tip, its leaflets laid out neatly. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 475,
+    "index": 478,
     "key": "explore:frayed_map_corner",
     "file": "explore__frayed_map_corner.png",
     "rarity": "Common",
@@ -4284,7 +4311,7 @@
     "prompt": "Game item icon: a single torn triangular corner of an old tan parchment map with frayed edges, a dotted red trail line and a tiny compass mark. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 476,
+    "index": 479,
     "key": "explore:waypoint_flint",
     "file": "explore__waypoint_flint.png",
     "rarity": "Uncommon",
@@ -4293,7 +4320,7 @@
     "prompt": "Game item icon: a single knapped dark grey flint stone with a pale arrow chipped into its face, pointing the way. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 477,
+    "index": 480,
     "key": "explore:compass_shard",
     "file": "explore__compass_shard.png",
     "rarity": "Uncommon",
@@ -4302,7 +4329,7 @@
     "prompt": "Game item icon: a single broken wedge-shaped shard of a brass compass face showing part of the dial markings and a red needle tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 478,
+    "index": 481,
     "key": "explore:charted_vellum",
     "file": "explore__charted_vellum.png",
     "rarity": "Rare",
@@ -4311,7 +4338,7 @@
     "prompt": "Game item icon: a single sheet of cream vellum half unrolled, a neatly inked coastline map in blue and brown across it. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 479,
+    "index": 482,
     "key": "explore:surveyors_lens",
     "file": "explore__surveyors_lens.png",
     "rarity": "Rare",
@@ -4320,7 +4347,7 @@
     "prompt": "Game item icon: a single round brass-rimmed magnifying lens with a short wooden handle, the glass pale blue with a faint glint. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 480,
+    "index": 483,
     "key": "explore:lantern_glass",
     "file": "explore__lantern_glass.png",
     "rarity": "Epic",
@@ -4329,7 +4356,7 @@
     "prompt": "Game item icon: a single curved pane of amber lantern glass framed in thin brass, a warm candle glow trapped inside it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 481,
+    "index": 484,
     "key": "explore:trailwardens_knot",
     "file": "explore__trailwardens_knot.png",
     "rarity": "Epic",
@@ -4338,7 +4365,7 @@
     "prompt": "Game item icon: a single intricate looping trail knot of braided green and brown rope, its ends bound with gold thread. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 482,
+    "index": 485,
     "key": "explore:wayfarers_seal",
     "file": "explore__wayfarers_seal.png",
     "rarity": "Legendary",
@@ -4347,7 +4374,7 @@
     "prompt": "Game item icon: a single round deep-crimson wax seal pressed with a gold compass-rose crest, glowing gold around its edge, its scalloped wax edge kept well inside the rim. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   },
   {
-    "index": 483,
+    "index": 486,
     "key": "explore:cartographers_ink",
     "file": "explore__cartographers_ink.png",
     "rarity": "Legendary",

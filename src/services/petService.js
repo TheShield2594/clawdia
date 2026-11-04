@@ -10,6 +10,8 @@ const PERSONALITY_TRAITS = {
     energetic:   { label: 'Energetic',   emoji: '⚡', desc: 'Always ready for action, sometimes too ready.' },
     mischievous: { label: 'Mischievous', emoji: '😈', desc: 'Has a talent for finding trouble.' },
     loyal:       { label: 'Loyal',       emoji: '🛡️', desc: 'Would follow you to the ends of the earth.' },
+    curious:     { label: 'Curious',     emoji: '🔍', desc: 'Has to sniff, poke and investigate absolutely everything.' },
+    stubborn:    { label: 'Stubborn',    emoji: '🪨', desc: 'Does things its own way, and will not be hurried.' },
 };
 
 const PERSONALITY_KEYS = Object.keys(PERSONALITY_TRAITS);
@@ -44,6 +46,18 @@ const TRAIT_FLAVOR = {
         mine: (name, emoji) => `${emoji} **${name}** stands guard at the tunnel entrance, unwavering.`,
         explore: (name, emoji) => `${emoji} **${name}** never lets you out of sight on the trail.`,
     },
+    curious: {
+        hunt: (name, emoji) => `${emoji} **${name}** noses through every bush on the trail, turning up tracks you'd have missed.`,
+        fish: (name, emoji) => `${emoji} **${name}** peers into the water, trying to see what's nibbling.`,
+        mine: (name, emoji) => `${emoji} **${name}** sniffs at every glint in the rock face.`,
+        explore: (name, emoji) => `${emoji} **${name}** darts off to inspect a strange stone, then waves you over.`,
+    },
+    stubborn: {
+        hunt: (name, emoji) => `${emoji} **${name}** plants itself on one spot and refuses to budge, and sure enough, the game comes past.`,
+        fish: (name, emoji) => `${emoji} **${name}** insists on its own spot on the bank, and won't hear otherwise.`,
+        mine: (name, emoji) => `${emoji} **${name}** keeps digging at the same stubborn seam long after you'd have given up.`,
+        explore: (name, emoji) => `${emoji} **${name}** picks its own path, and ignores yours.`,
+    },
 };
 
 // Pet definitions: passive bonuses and feeding materials
@@ -52,13 +66,24 @@ const PET_DEFINITIONS = {
     cat:          { petId: 'cat',         emoji: '🐱', name: 'Cat',         cost: 2000,  purchasable: true,  bonusType: 'crime_success',     bonusPct: 5,  favoriteMaterial: 'feather',        materialSource: 'hunt' },
     bird:         { petId: 'bird',        emoji: '🐦', name: 'Bird',        cost: 3000,  purchasable: true,  bonusType: 'xp_gain',           bonusPct: 10, favoriteMaterial: 'acorn_cache',    materialSource: 'hunt' },
     fish:         { petId: 'fish',        emoji: '🐠', name: 'Fish',        cost: 3000,  purchasable: true,  bonusType: 'fish_yield',        bonusPct: 5,  favoriteMaterial: 'fish_scale',     materialSource: 'fish' },
+    hamster:      { petId: 'hamster',     emoji: '🐹', name: 'Hamster',     cost: 3000,  purchasable: true,  bonusType: 'daily_coins',       bonusPct: 5,  favoriteMaterial: 'hardwood_chip',  materialSource: 'hunt' },
+    goat:         { petId: 'goat',        emoji: '🐐', name: 'Goat',        cost: 4000,  purchasable: true,  bonusType: 'explore_xp',        bonusPct: 8,  favoriteMaterial: 'pressed_fern',   materialSource: 'explore' },
     fox:          { petId: 'fox',         emoji: '🦊', name: 'Fox',         cost: 5000,  purchasable: true,  bonusType: 'rob_success',       bonusPct: 8,  favoriteMaterial: 'coyote_fang',    materialSource: 'hunt' },
+    badger:       { petId: 'badger',      emoji: '🦡', name: 'Badger',      cost: 5000,  purchasable: true,  bonusType: 'mine_yield',        bonusPct: 8,  favoriteMaterial: 'quartz_shard',   materialSource: 'mine' },
     wolf:         { petId: 'wolf',        emoji: '🐺', name: 'Wolf',        cost: 8000,  purchasable: true,  bonusType: 'hunt_yield',        bonusPct: 10, favoriteMaterial: 'wolf_pelt',      materialSource: 'hunt' },
     eagle:        { petId: 'eagle',       emoji: '🦅', name: 'Eagle',       cost: null,  purchasable: false, bonusType: 'hunt_xp',           bonusPct: 15, favoriteMaterial: 'eagle_talon',    materialSource: 'hunt' },
     shark:        { petId: 'shark',       emoji: '🦈', name: 'Shark',       cost: null,  purchasable: false, bonusType: 'fish_yield',        bonusPct: 15, favoriteMaterial: 'shark_tooth',    materialSource: 'fish' },
     crystal_fox:  { petId: 'crystal_fox', emoji: '💎', name: 'Crystal Fox', cost: null,  purchasable: false, bonusType: 'mine_yield',        bonusPct: 15, favoriteMaterial: 'crystal_sliver', materialSource: 'mine' },
     lantern_owl:  { petId: 'lantern_owl', emoji: '🦉', name: 'Lantern Owl', cost: null,  purchasable: false, bonusType: 'explore_xp',        bonusPct: 15, favoriteMaterial: 'lantern_glass',  materialSource: 'explore' }
 };
+
+// The Hamster, Goat and Badger came later. Mining and exploring had a rare
+// companion but nothing in the shop, so a player who mostly dug or explored
+// had no pet to buy that helped with it; the Badger and the Goat are those
+// pets, weaker than the Crystal Fox and Lantern Owl, the way the Fish is
+// weaker than the Shark. The Hamster is the first passive outside the grind
+// and crime loops: a little more from /daily, applied inside daily's combined
+// multiplier so the existing cap still holds.
 
 // ── Acquisition ───────────────────────────────────────────────────────────────
 //
@@ -297,6 +322,9 @@ const SPECIES_ACTIONS = {
     shark:       { fed: 'lazy, lazy circles',               hungry: 'restless, tightening circles' },
     crystal_fox: { fed: 'a faint chime of crystal',         hungry: 'a dim, flickering glow' },
     lantern_owl: { fed: 'lantern glowing warm and steady',  hungry: 'lantern guttering low' },
+    hamster:     { fed: 'cheeks stuffed, busily grooming',  hungry: 'rattling the empty food dish' },
+    goat:        { fed: 'a contented, rumbling bleat',      hungry: 'chewing hopefully on your sleeve' },
+    badger:      { fed: 'curled up in a snug burrow',       hungry: 'digging grumpily at the floor' },
 };
 
 /** The species gesture that goes with a pet's mood line, or null for an unknown species. */
@@ -1026,6 +1054,9 @@ const EVOLVED_EMOJI = {
     shark:       { 2: '🌊',  3: '🔱' },
     crystal_fox: { 2: '💠',  3: '🔮' },
     lantern_owl: { 2: '🕯️',  3: '🏮' },
+    hamster:     { 2: '🥜',  3: '👑' },
+    goat:        { 2: '🐏',  3: '⛰️' },
+    badger:      { 2: '⛏️',  3: '🏔️' },
 };
 
 // Total XP required to *reach* a given level (cumulative). Gentle quadratic curve.
@@ -1055,7 +1086,8 @@ function getPetDisplay(pet) {
     const emoji = EVOLVED_EMOJI[pet.petId]?.[stage] ?? def.emoji;
     const title = EVOLUTION_TITLES[stage] ?? '';
     const baseName = pet.name || def.name;
-    return { emoji, name: baseName, titledName: `${title}${baseName}`.trim() };
+    const stars = ascensionStars(pet);
+    return { emoji, name: baseName, titledName: `${title}${baseName}${stars ? ` ${stars}` : ''}`.trim() };
 }
 
 /**
@@ -1075,7 +1107,10 @@ function getEffectiveBonusPct(pet, now = Date.now()) {
     // passive, so a well-kept pet is a little better than a neglected one at
     // the same level without outgrowing MAX_STACKED_BONUS_PCT on its own.
     const bondBoost = 1 + getBondTier(pet, now).boost;
-    return Math.round(def.bonusPct * mult * bondBoost * 10) / 10;
+    // Ascension, like bond, sits outside the level cap: it is what a pet has
+    // done, not where it stands now.
+    const ascendBoost = 1 + petAscensions(pet) * ASCENSION_BONUS_PER_STAR;
+    return Math.round(def.bonusPct * mult * bondBoost * ascendBoost * 10) / 10;
 }
 
 /**
@@ -1127,6 +1162,63 @@ function evolutionSummary(pet, res, now = Date.now()) {
     };
 }
 
+// ── Ascension ────────────────────────────────────────────────────────────────
+//
+// Progression used to stop at level 30: the pet was Apex, its passive was at
+// the level cap, and nothing a player did with it after that changed anything.
+// Ascending starts a maxed pet over at level 1 (stage 1, no XP) in exchange
+// for a star that it keeps for good. Each star adds ASCENSION_BONUS_PER_STAR
+// of the pet's passive on top of the level multiplier, up to ASCENSION_MAX
+// stars, so a three-star pet back at level 30 gives 30% more than it did.
+//
+// Everything else stays: name, personality, bond, training, battle record and
+// ladder title. Fights are untouched: a star is no stat, and the pet fights
+// at the level it is, so it re-earns its place. MAX_STACKED_BONUS_PCT still
+// caps any one bonus type across the roster, so a rare pet already near the
+// cap gains mostly the star.
+
+const ASCENSION_MAX            = 3;
+const ASCENSION_BONUS_PER_STAR = 0.10;
+const ASCENSION_STAR           = '✦';
+
+/** Stars a pet has earned, 0–ASCENSION_MAX. */
+function petAscensions(pet) {
+    const n = Math.floor(Number(pet?.ascensions ?? 0));
+    return Number.isFinite(n) ? Math.min(ASCENSION_MAX, Math.max(0, n)) : 0;
+}
+
+/** The stars as shown after a pet's name ('' for none). */
+function ascensionStars(pet) {
+    return ASCENSION_STAR.repeat(petAscensions(pet));
+}
+
+/**
+ * Whether a pet can ascend now. Returns `{ ok: true }` or
+ * `{ ok: false, reason: 'level'|'maxed'|'vacation' }`.
+ */
+function canAscend(pet, now = Date.now()) {
+    if (petAscensions(pet) >= ASCENSION_MAX) return { ok: false, reason: 'maxed' };
+    if ((pet?.level ?? 1) < PET_MAX_LEVEL) return { ok: false, reason: 'level' };
+    if (isOnVacation(pet, now)) return { ok: false, reason: 'vacation' };
+    return { ok: true };
+}
+
+/**
+ * Ascend a pet. Mutates it; call canAscend first. Returns
+ * `{ ascensions, fromPct, toPct, maxPct }`: the passive just before, just
+ * after (now at level 1), and what it will be back at level 30.
+ */
+function ascendPet(pet, now = Date.now()) {
+    const fromPct = getEffectiveBonusPct(pet, now);
+    pet.ascensions     = petAscensions(pet) + 1;
+    pet.level          = 1;
+    pet.xp             = 0;
+    pet.evolutionStage = 1;
+    const toPct  = getEffectiveBonusPct(pet, now);
+    const maxPct = getEffectiveBonusPct({ ...(pet.toObject ? pet.toObject() : pet), level: PET_MAX_LEVEL, evolutionStage: stageForLevel(PET_MAX_LEVEL) }, now);
+    return { ascensions: pet.ascensions, fromPct, toPct, maxPct };
+}
+
 // ── Battle engine ───────────────────────────────────────────────────────────
 
 // Personalities tilt combat stats, each a different way to win: Energetic
@@ -1144,6 +1236,10 @@ const PERSONALITY_COMBAT = {
     mischievous: { atk: 0.06, crit: 0.10 },
     loyal:       { hp: 0.10,  def: 0.05 },
     lazy:        { def: 0.15, hp: 0.06 },
+    // Curious and Stubborn came later; tuned the same way, they land within
+    // about ±3.5% of every other personality at levels 1, 15 and 28.
+    curious:     { spd: 0.15, crit: 0.05, atk: 0.065 },
+    stubborn:    { hp: 0.06,  atk: 0.045 },
 };
 
 const BASE_CRIT_CHANCE = 0.10;
@@ -1176,6 +1272,9 @@ const SPECIES_MOVES = Object.freeze({
     shark:       { name: 'Frenzy',          kind: 'frenzy',  mult: 1.08,               desc: 'Hits 8% harder while the opponent is under half HP.' },
     crystal_fox: { name: 'Crystal Ward',    kind: 'ward',    pct: 0.04,                desc: 'Starts behind a ward that soaks up its first few points of damage.' },
     lantern_owl: { name: 'Lantern Flare',   kind: 'blind',   chance: 0.04,             desc: 'Sometimes dazzles the opponent, and their next attack misses.' },
+    hamster:     { name: 'Cheek Pouch',     kind: 'mend',    chance: 0.25, pct: 0.04,  desc: 'Sometimes nibbles a stashed snack and recovers a little HP after a hit.' },
+    goat:        { name: 'Ram Charge',      kind: 'opener',  mult: 1.2,                desc: 'Opens with a charge: its first strike lands 20% harder.' },
+    badger:      { name: 'Snarl',           kind: 'weaken',  chance: 0.08, mult: 0.5,  desc: "Sometimes snarls, and the opponent's next hit lands at half strength." },
     wild_boar:   { name: 'Gore Charge',     kind: 'opener',  mult: 1.2,                desc: 'Opens with a charge: its first strike lands 20% harder.' },
     feral_cat:   { name: 'Hiss',            kind: 'weaken',  chance: 0.08, mult: 0.5,  desc: "Sometimes hisses, and the opponent's next hit lands at half strength." },
     stray_hound: { name: 'Scavenge',        kind: 'mend',    chance: 0.25, pct: 0.04,  desc: 'Sometimes recovers a little HP after a hit.' },
@@ -1784,6 +1883,13 @@ module.exports = {
     getEffectiveBonusPct,
     applyPetXp,
     evolutionSummary,
+    ASCENSION_MAX,
+    ASCENSION_BONUS_PER_STAR,
+    ASCENSION_STAR,
+    petAscensions,
+    ascensionStars,
+    canAscend,
+    ascendPet,
     getPetStats,
     firstStrikeChance,
     PERSONALITY_COMBAT,

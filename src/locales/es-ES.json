@@ -1109,6 +1109,12 @@
           "name": { "description": "Nuevo nombre (máx. 32 caracteres)" }
         }
       },
+      "ascend": {
+        "description": "Devuelve una mascota de nivel 30 al nivel 1 por una estrella que refuerza su pasiva.",
+        "options": {
+          "slot": { "description": "Qué mascota ascender" }
+        }
+      },
       "list": { "description": "Consulta todas las mascotas disponibles en la tienda." },
       "codex": { "description": "Todas las especies de mascota: las que has tenido y de dónde salen las raras." },
       "vacation": {

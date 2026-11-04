@@ -2,7 +2,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
-const { heartBar, getPetDisplay, effectiveBond, bondTierFor } = require('../../../services/petService');
+const { heartBar, getPetDisplay, effectiveBond, bondTierFor, PET_MAX_LEVEL } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
 const { petItemId } = require('../../../data/activityItems');
 const { sendBoard, displayNameOf } = require('../../../utils/leaderboardCard');
@@ -72,8 +72,10 @@ async function executeLeaderboard(interaction) {
     let poolSize = 10;
 
     if (sortType === 'level') {
-        addFieldsStage = { $addFields: { petLevel: '$pets.level' } };
-        sortStage = { $sort: { petLevel: -1 } };
+        // Ascension stars rank above level: an ascended pet back at level 5
+        // has been further than any pet that has never reached 30.
+        addFieldsStage = { $addFields: { petLevel: '$pets.level', petAscensions: { $ifNull: ['$pets.ascensions', 0] } } };
+        sortStage = { $sort: { petAscensions: -1, petLevel: -1 } };
         titleLabel = 'Highest Level Pets';
         lineBuilder = (e, rank) => {
             const { emoji, titledName } = getPetDisplay(e.pet);
@@ -82,7 +84,7 @@ async function executeLeaderboard(interaction) {
             const stars = '⭐'.repeat(e.pet.evolutionStage ?? 1);
             return `${rank} ${emoji} **${titledName}** ${stars} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
         };
-        cardValue = e => ({ value: `Level ${e.pet.level ?? 1}`, score: e.pet.level ?? 1 });
+        cardValue = e => ({ value: `Level ${e.pet.level ?? 1}`, score: (e.pet.ascensions ?? 0) * PET_MAX_LEVEL + (e.pet.level ?? 1) });
     } else if (sortType === 'wins') {
         // PvP only: wild wins are a count of time spent grinding, and anyone
         // can rack them up. Fewer losses breaks a tie in wins.

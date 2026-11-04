@@ -410,6 +410,9 @@ const PET_SPRITE_COLORS = {
     shark:       { bg: '#607d8b', ring: '#37474f' },
     crystal_fox: { bg: '#7c4dff', ring: '#311b92' },
     lantern_owl: { bg: '#ffb300', ring: '#5d4037' },
+    hamster:     { bg: '#ffcc80', ring: '#e65100' },
+    goat:        { bg: '#d7ccc8', ring: '#5d4037' },
+    badger:      { bg: '#78909c', ring: '#212121' },
 };
 
 // Mirrors EVOLUTION_STAGE emoji in petService so a showcased Apex pet is
@@ -425,12 +428,15 @@ const EVOLVED_PET_EMOJIS = {
     shark:       { 2: '🌊', 3: '🔱' },
     crystal_fox: { 2: '💠', 3: '🔮' },
     lantern_owl: { 2: '🕯️', 3: '🏮' },
+    hamster:     { 2: '🥜', 3: '👑' },
+    goat:        { 2: '🐏', 3: '⛰️' },
+    badger:      { 2: '⛏️', 3: '🏔️' },
 };
 
 const PET_SPRITE_EMOJIS = {
     dog: '🐶', cat: '🐱', bird: '🐦', fish: '🐠',
     fox: '🦊', wolf: '🐺', eagle: '🦅', shark: '🦈', crystal_fox: '💎',
-    lantern_owl: '🦉',
+    lantern_owl: '🦉', hamster: '🐹', goat: '🐐', badger: '🦡',
 };
 
 // An evolved pet should not look identical to a hatchling: stage 2 and 3 swap in

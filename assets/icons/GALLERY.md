@@ -1,6 +1,6 @@
 # Clawdia economy & shop icons — visual gallery
 
-All 132 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat two-tone shading, no gloss, rarity-coloured rim, transparent background) — 118 economy/shop icons plus the 14 pet portraits (issue #1082), which use a front-facing character-portrait framing. Images are served from Higgsfield's CDN and proxied by GitHub, so they render here and in the PR.
+All 135 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat two-tone shading, no gloss, rarity-coloured rim, transparent background) — 118 economy/shop icons plus the 17 pet portraits (14 from issue #1082, then the Hamster, Goat and Badger), which use a front-facing character-portrait framing. Images are served from Higgsfield's CDN and proxied by GitHub, so they render here and in the PR.
 
 > To save one on mobile: long-press the image. The storage key under each icon is the `ItemImage` upload key (`:` becomes `__` as a filename).
 
@@ -143,7 +143,7 @@ All 132 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat t
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173229_e25fe4bd-0572-42ac-acb0-57066e171154.png" width="72"> | Obsidian Crown | Mythic | `obsidian_crown` |
 
 
-## Pets (14)
+## Pets (17)
 
 Character-portrait framing (front-facing mascot) on the same B3 rim + flat shading. Bundle-only — not per-guild uploadable. Rarity by tier: ownable Common→Epic, rare companions Legendary, wild battle opponents Common.
 
@@ -155,6 +155,9 @@ Character-portrait framing (front-facing mascot) on the same B3 rim + flat shadi
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_2c048b9e-d126-4e9b-9365-c5f41fa0f58b.png" width="72" alt="Fish portrait"> | Fish | Uncommon | `pet:fish` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_6827928e-104d-4723-adb3-3e85726f73ad.png" width="72" alt="Fox portrait"> | Fox | Rare | `pet:fox` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_9a70c3c1-218e-45a3-a6b5-60a58932d410.png" width="72" alt="Wolf portrait"> | Wolf | Epic | `pet:wolf` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182626_52711ca9-fd7a-4bc9-83fa-bd63c88ca38e.png" width="72" alt="Hamster portrait"> | Hamster | Uncommon | `pet:hamster` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182628_708520a7-5470-4d82-853e-e2b234159963.png" width="72" alt="Goat portrait"> | Goat | Uncommon | `pet:goat` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261104_182626_d56782cc-f29d-466f-bb00-57495a102890.png" width="72" alt="Badger portrait"> | Badger | Rare | `pet:badger` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_223340d2-c29b-4da7-ae95-2bd4d169f319.png" width="72" alt="Eagle portrait"> | Eagle | Legendary | `pet:eagle` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_e2b483a6-cfa7-46c7-bfef-5c0f751d23bc.png" width="72" alt="Shark portrait"> | Shark | Legendary | `pet:shark` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_757cc5cb-b9c2-4e62-a2a3-3c63ef923fd1.png" width="72" alt="Crystal Fox portrait"> | Crystal Fox | Legendary | `pet:crystal_fox` |
