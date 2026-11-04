@@ -795,6 +795,8 @@ describe('/pet ascend', () => {
         expect(stored().pets[0]).toMatchObject({ level: 1, xp: 0, evolutionStage: 1, ascensions: 1, bond: 40, name: 'Rex' });
         expect(textOf(interaction)).toContain('Rex ascended!');
         expect(checkAndAward).toHaveBeenCalled();
+        // The press is acknowledged before the database work, and answered after.
+        expect(interaction.replies.at(-1).embeds[0].data.title).toContain('Rex ascended!');
     });
 
     test('a pet below level 30 is refused before the prompt', async () => {

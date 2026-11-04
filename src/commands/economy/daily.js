@@ -107,7 +107,7 @@ function buildCalendarEmbed(user, dailyAmount, currentStreak) {
     // Next 6 days
     for (let i = 1; i <= 6; i++) {
         const futureStreak = currentStreak + i;
-        const mult      = getStreakMultiplier(futureStreak);
+        const mult      = getStreakMultiplier(futureStreak) * petDailyMultiplier(user);
         const estCoins  = Math.round(dailyAmount * Math.min(mult, MAX_COMBINED_MULTIPLIER));
         const milestone = DROP_MILESTONES.includes(futureStreak);
         if (milestone) {

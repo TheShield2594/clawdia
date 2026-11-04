@@ -30,7 +30,7 @@ const {
 } = require('../src/services/petService');
 const { ACHIEVEMENTS, ALL_PET_IDS } = require('../src/data/achievements');
 const { codexSummary } = require('../src/commands/economy/pet/codex');
-const { __test__: { refusal, nextMaxPct } } = require('../src/commands/economy/pet/ascend');
+const { __test__: { refusal, nextMaxPct, paidPct } } = require('../src/commands/economy/pet/ascend');
 
 const maxed = (over = {}) => ({
     ...createPet('wolf', { now: new Date() }),
@@ -66,6 +66,8 @@ describe('ascension', () => {
         const res = ascendPet(pet);
         expect(res.fromPct).toBe(before);
         expect(res.toPct).toBeLessThan(before);
+        expect(res.toPct).toBe(getEffectiveBonusPct(maxed({ level: 1, evolutionStage: 1, ascensions: 1 })));
+        expect(res.toPct).toBeCloseTo(getEffectiveBonusPct(maxed({ level: 1, evolutionStage: 1 })) * (1 + ASCENSION_BONUS_PER_STAR), 0);
         expect(res.maxPct).toBeCloseTo(before * (1 + ASCENSION_BONUS_PER_STAR), 0);
         expect(getEffectiveBonusPct(maxed({ ascensions: 3 }))).toBeCloseTo(before * (1 + 3 * ASCENSION_BONUS_PER_STAR), 0);
     });
@@ -99,6 +101,13 @@ describe('ascension', () => {
         const pet = maxed();
         expect(nextMaxPct(pet)).toBe(getEffectiveBonusPct(maxed({ ascensions: 1 })));
         expect(pet.ascensions ?? 0).toBe(0); // the preview does not mutate
+    });
+
+    test('the preview shows what pays out, so a starred rare pet stops at the stacking cap', () => {
+        const shark = maxed({ petId: 'shark' });
+        expect(getEffectiveBonusPct({ ...shark, ascensions: 1 })).toBeGreaterThan(MAX_STACKED_BONUS_PCT);
+        expect(nextMaxPct(shark)).toBe(MAX_STACKED_BONUS_PCT);
+        expect(paidPct(12.5)).toBe(12.5);
     });
 });
 

@@ -9,7 +9,7 @@ const {
     EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
 const {
-    PET_DEFINITIONS, PET_MAX_LEVEL, ASCENSION_MAX, ASCENSION_BONUS_PER_STAR, ASCENSION_STAR,
+    PET_DEFINITIONS, PET_MAX_LEVEL, ASCENSION_MAX, ASCENSION_BONUS_PER_STAR, ASCENSION_STAR, MAX_STACKED_BONUS_PCT,
     getPetDisplay, resolvePetRef, petAscensions, canAscend, ascendPet,
     getEffectiveBonusPct, formatPetBonus, stageForLevel,
 } = require('../../../services/petService');
@@ -28,15 +28,24 @@ function refusal(reason, name, pet) {
     return `**${name}** needs to reach level ${PET_MAX_LEVEL} to ascend (it is level ${pet.level ?? 1}).`;
 }
 
-/** The passive at level 30 with one more star, without changing `pet`. */
+/**
+ * A passive as it pays out: getTotalBonus caps any one bonus type at
+ * MAX_STACKED_BONUS_PCT, so a rare pet's starred passive can read higher than
+ * it pays. Every figure shown here goes through this.
+ */
+function paidPct(pct) {
+    return Math.min(MAX_STACKED_BONUS_PCT, pct);
+}
+
+/** The passive at level 30 with one more star, as paid, without changing `pet`. */
 function nextMaxPct(pet) {
     const plain = pet.toObject ? pet.toObject() : { ...pet };
-    return getEffectiveBonusPct({
+    return paidPct(getEffectiveBonusPct({
         ...plain,
         ascensions: petAscensions(pet) + 1,
         level: PET_MAX_LEVEL,
         evolutionStage: stageForLevel(PET_MAX_LEVEL),
-    });
+    }));
 }
 
 async function executeAscend(interaction) {
@@ -53,7 +62,7 @@ async function executeAscend(interaction) {
     if (!check.ok) return interaction.reply({ content: refusal(check.reason, name, pet), flags: MessageFlags.Ephemeral });
 
     const stars   = petAscensions(pet) + 1;
-    const nowPct  = getEffectiveBonusPct(pet);
+    const nowPct  = paidPct(getEffectiveBonusPct(pet));
     const thenPct = nextMaxPct(pet);
     const passive = def
         ? `Its passive drops while it re-levels, then comes back stronger: ` +
@@ -101,6 +110,11 @@ async function executeAscend(interaction) {
         return choice.update({ content: `**${name}** stays as it is.`, embeds: [], components: [] }).catch(() => {});
     }
 
+    // Acknowledge the press before the reads and writes below, which could
+    // otherwise run past Discord's three seconds; the answers that follow go
+    // through editReply.
+    await choice.deferUpdate().catch(() => {});
+
     // Re-read and re-check by id: the pet may have changed while the prompt
     // was open. Ascending is a pure function of the fresh document (no dice,
     // no coins), so a lost version race replays safely, achievements included.
@@ -130,22 +144,22 @@ async function executeAscend(interaction) {
     }
 
     if (conflict) {
-        return choice.update({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
+        return choice.editReply({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
     }
     if (!saved) {
         const content = stopped === 'gone' || !stopped
             ? `**${name}** is no longer in your roster.`
             : refusal(stopped, name, pet);
-        return choice.update({ content, embeds: [], components: [] }).catch(() => {});
+        return choice.editReply({ content, embeds: [], components: [] }).catch(() => {});
     }
     announcePetAchievements(interaction, saved, guildSettings, earned);
 
     const fresh   = resolvePetRef(saved.pets, petId)?.pet;
     const shown   = fresh ? getPetDisplay(fresh) : { emoji: def?.emoji ?? '🐾', titledName: name };
     const passiveLine = def
-        ? `\nPassive now **${formatPetBonus(def.bonusType, result.toPct)}**, rising to **${formatPetBonus(def.bonusType, result.maxPct)}** at Lv.${PET_MAX_LEVEL}.`
+        ? `\nPassive now **${formatPetBonus(def.bonusType, paidPct(result.toPct))}**, rising to **${formatPetBonus(def.bonusType, paidPct(result.maxPct))}** at Lv.${PET_MAX_LEVEL}.`
         : '';
-    return choice.update({
+    return choice.editReply({
         content: null,
         embeds: [new EmbedBuilder()
             .setColor(COLORS.PRIZE)
@@ -158,4 +172,4 @@ async function executeAscend(interaction) {
     }).catch(() => {});
 }
 
-module.exports = { executeAscend, __test__: { refusal, nextMaxPct } };
+module.exports = { executeAscend, __test__: { refusal, nextMaxPct, paidPct } };

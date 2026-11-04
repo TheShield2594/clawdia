@@ -142,6 +142,27 @@ describe('the claim', () => {
         expect(mockUsers.get(USER_ID).balance).toBe(1000);
     });
 
+    // The pet multiplier joins the others *inside* the clamp, so a Hamster on
+    // top of an already capped streak and server boost adds nothing.
+    it('keeps a fed Hamster under the combined multiplier cap', async () => {
+        const { createPet } = require('../src/services/petService');
+        const { MAX_COMBINED_MULTIPLIER } = require('../src/config/economy');
+        seedUser({ pets: [createPet('hamster')], streak: { current: 365, freezes: 0 } });
+        require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
+        mockGuilds.seed({
+            guildId: GUILD_ID,
+            economy: { currency: '💰', dailyAmount: 1000 },
+            serverBoost: { type: 'coin', multiplier: 10, expiresAt: new Date(Date.now() + DAY_MS) },
+        });
+        try {
+            await daily.execute(makeInteraction());
+            expect(mockUsers.get(USER_ID).balance).toBe(1000 * MAX_COMBINED_MULTIPLIER);
+        } finally {
+            // The boosted settings are cached; later tests must not see them.
+            require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
+        }
+    });
+
     it('falls back to a default amount when the guild has no economy settings', async () => {
         seedUser();
         // No Guild document at all — a fresh server that has never opened the
