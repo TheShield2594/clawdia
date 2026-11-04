@@ -6,7 +6,7 @@
  *
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
- * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics
+ * + 17 pet species (issue #1082) + 10 explore regions + 25 explore relics
  * + achievement badges (`achievement:<id>`, filled in incrementally)
  * + crafting materials (`fish:<id>` etc., one game at a time, #1168). Each
  * entry carries the storage key, the on-disk filename, the item's rarity, the
@@ -311,8 +311,8 @@ Object.values(mine.ORES).forEach((o) => addResult('ore', 'ore', o));
 // centered object — while keeping the B3 rarity rim + flat two-tone shading so
 // they read as the same set. Art is per species, not per personality.
 //
-// Rarity by tier: the six ownable species escalate by adoption cost
-// (dog/cat Common → bird/fish Uncommon → fox Rare → wolf Epic), the four
+// Rarity by tier: the nine shop species escalate by adoption cost
+// (dog/cat Common → bird/fish/hamster/goat Uncommon → fox/badger Rare → wolf Epic), the four
 // unpurchasable rare companions (eagle/shark/crystal_fox/lantern_owl) that only
 // drop from a legendary grind result are Legendary, and the four wild battle
 // opponents are Common.
@@ -324,6 +324,7 @@ const petPrompt = (subject, rarityName) => `Pet portrait icon: ${subject} ${PET_
 
 const PET_RARITY = {
     dog: 'Common', cat: 'Common', bird: 'Uncommon', fish: 'Uncommon', fox: 'Rare', wolf: 'Epic',
+    hamster: 'Uncommon', goat: 'Uncommon', badger: 'Rare',
     eagle: 'Legendary', shark: 'Legendary', crystal_fox: 'Legendary', lantern_owl: 'Legendary',
     wild_boar: 'Common', feral_cat: 'Common', stray_hound: 'Common', cave_bat: 'Common',
 };
@@ -338,6 +339,9 @@ const PET_SUBJECT = {
     fish:         'a plump tropical pet fish with orange and white fins, flowing tail and big round eyes, shown side-on and facing the viewer.',
     fox:          'a bright orange-red fox with a white chest and a bushy tail, sitting alert with a clever grin and facing the viewer.',
     wolf:         'a proud grey timber wolf with amber eyes and a thick furry ruff, head and shoulders facing the viewer.',
+    hamster:      'a plump golden hamster with bulging stuffed cheeks, tiny pink paws and bright black eyes, sitting up and facing the viewer.',
+    goat:         'a sure-footed white mountain goat with short curved horns, a little beard and a cheeky expression, head and shoulders facing the viewer.',
+    badger:       'a stocky badger with a bold black-and-white striped face, grey fur and strong digging claws, facing the viewer.',
     eagle:        'a majestic bald eagle with a white head, sharp golden hooked beak and a fierce gaze, head and shoulders facing the viewer, a faint radiant glow.',
     shark:        'a sleek grey great white shark with a toothy grin and a pale underbelly, shown side-on facing the viewer, a faint aura.',
     crystal_fox:  'a mystical fox sculpted from glowing translucent blue crystal, faceted fur and shining eyes, sitting and facing the viewer, a soft magical glow.',

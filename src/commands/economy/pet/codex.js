@@ -17,6 +17,7 @@ const { petItemId } = require('../../../data/activityItems');
 const { createGrindCollectionCard } = require('../../../utils/grindProfileCard');
 const { renderAttachment, pagePayload } = require('../../../utils/grindProfileView');
 const COLORS = require('../../../utils/embedColors');
+const { ACHIEVEMENTS } = require('../../../data/achievements');
 const { resolveUser } = require('./shared');
 
 const SHOP_COLOR = '#5dade2';
@@ -45,6 +46,15 @@ function codexLine({ def, owned }) {
         : `❔ **${def.name}** — *${rarePetHint(def)}*`;
 }
 
+/** The headline: progress, and what filling the codex is worth. */
+function codexSummary(owned, total) {
+    const zoologist = ACHIEVEMENTS.find(a => a.id === 'zoologist');
+    const reward = zoologist?.coinReward ? ` (${zoologist.coinReward.toLocaleString()} coins)` : '';
+    return owned >= total
+        ? `**${owned} of ${total}** species owned. The codex is complete. 📖`
+        : `**${owned} of ${total}** species owned. Own every one to earn **${zoologist?.name ?? 'Zoologist'}**${reward}.`;
+}
+
 async function executeCodex(interaction) {
     const user = await resolveUser(interaction);
     const { shop, rare, owned, total } = codexEntries(user);
@@ -53,7 +63,7 @@ async function executeCodex(interaction) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
         .setTitle(`📖 ${name}'s Pet Codex`)
-        .setDescription(`**${owned} of ${total}** species owned.`)
+        .setDescription(codexSummary(owned, total))
         .addFields(
             { name: '🛒 From the shop (/pet adopt)', value: shop.map(codexLine).join('\n'), inline: false },
             { name: '✨ Rare companions', value: rare.map(codexLine).join('\n'), inline: false },
@@ -76,4 +86,4 @@ async function executeCodex(interaction) {
     return interaction.reply(pagePayload(embed, card));
 }
 
-module.exports = { executeCodex, codexEntries, codexLine };
+module.exports = { executeCodex, codexEntries, codexLine, codexSummary };

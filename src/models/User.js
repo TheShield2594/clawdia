@@ -43,6 +43,9 @@ const petFields = () => ({
     level:              { type: Number,  default: 1, min: 1 },
     xp:                 { type: Number,  default: 0, min: 0 },
     evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
+    // Ascension stars: a level 30 pet that starts over at level 1 keeps one
+    // for good — see the Ascension section of services/petService.js.
+    ascensions:         { type: Number,  default: 0, min: 0, max: 3 },
     battleWins:         { type: Number,  default: 0 },
     battleLosses:       { type: Number,  default: 0 },
     // Member-vs-member results only. battleWins/battleLosses also count wild

@@ -69,6 +69,9 @@ const SPECIES_ACCENT = {
     shark:       '#4dd0e1',
     crystal_fox: '#b388ff',
     lantern_owl: '#ffc857',
+    hamster:     '#ffb74d',
+    goat:        '#bcaaa4',
+    badger:      '#90a4ae',
 };
 const DEFAULT_ACCENT = '#8fb4ff';
 

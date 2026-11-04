@@ -28,6 +28,7 @@ const { executeLeaderboard } = require('./leaderboard');
 const { executeBattle } = require('./battle');
 const { executeCodex } = require('./codex');
 const { executeVacation } = require('./vacation');
+const { executeAscend } = require('./ascend');
 const { VACATION_MAX_DAYS } = require('../../../services/petService');
 
 module.exports = {
@@ -46,7 +47,10 @@ module.exports = {
                             { name: '🐱 Cat (2,000)',    value: 'cat'  },
                             { name: '🐦 Bird (3,000)',   value: 'bird' },
                             { name: '🐠 Fish (3,000)',   value: 'fish' },
+                            { name: '🐹 Hamster (3,000)', value: 'hamster' },
+                            { name: '🐐 Goat (4,000)',   value: 'goat' },
                             { name: '🦊 Fox (5,000)',    value: 'fox'  },
+                            { name: '🦡 Badger (5,000)', value: 'badger' },
                             { name: '🐺 Wolf (8,000)',   value: 'wolf' },
                         )
                 )
@@ -84,6 +88,13 @@ module.exports = {
                 )
                 .addStringOption(opt =>
                     opt.setName('name').setDescription('New name (max 32 chars)').setRequired(true).setMaxLength(32)
+                )
+        )
+        .addSubcommand(sub =>
+            sub.setName('ascend')
+                .setDescription('Start a level 30 pet over at level 1 for a permanent star that strengthens its passive.')
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to ascend').setRequired(true).setAutocomplete(true)
                 )
         )
         .addSubcommand(sub => sub.setName('list').setDescription('View all available pets in the shop.'))
@@ -141,6 +152,7 @@ module.exports = {
             if (sub === 'battle')      return await executeBattle(interaction);
             if (sub === 'codex')       return await executeCodex(interaction);
             if (sub === 'vacation')    return await executeVacation(interaction);
+            if (sub === 'ascend')      return await executeAscend(interaction);
         } catch (err) {
             console.error('[pet] error:', err);
             const msg = { content: 'Something went wrong with the pet command.', flags: MessageFlags.Ephemeral };

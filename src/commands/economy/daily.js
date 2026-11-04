@@ -19,6 +19,13 @@ const { challengeBonusPayoutKey, questRewardPayoutKey } = require('../../utils/p
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { getTotalBonus } = require('../../services/petService');
+
+// A fed Hamster's `daily_coins` passive, as a multiplier. It joins the others
+// inside the combined multiplier, so MAX_COMBINED_MULTIPLIER still caps the lot.
+function petDailyMultiplier(user) {
+    return 1 + getTotalBonus(user?.pets ?? [], 'daily_coins') / 100;
+}
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -45,7 +52,7 @@ function getStreakDescription(streak, isMilestone) {
     return "Good to see you today.";
 }
 
-function buildRewardBlock(amount, streak, streakMult, coinMult, serverMult, combined, balance, capActive, droppedItem, isMilestone, streakCurrent, currency) {
+function buildRewardBlock(amount, streak, streakMult, coinMult, serverMult, combined, balance, capActive, droppedItem, isMilestone, streakCurrent, currency, petMult = 1) {
     const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
     const lines = [div];
     lines.push(`💰 Today's Reward: **${amount.toLocaleString()} coins**`);
@@ -55,6 +62,7 @@ function buildRewardBlock(amount, streak, streakMult, coinMult, serverMult, comb
     if (streakMult > 1.0) mults.push({ emoji: '🔥', label: `${streak}d` });
     if (coinMult > 1.0)   mults.push({ emoji: '💰🚀', label: `${coinMult}x` });
     if (serverMult > 1.0) mults.push({ emoji: '🌐', label: `${serverMult}x` });
+    if (petMult > 1.0)    mults.push({ emoji: '🐹', label: `+${Math.round((petMult - 1) * 1000) / 10}%` });
     const bar = stackBar(mults, combined, amount, currency);
     if (bar) lines.push(bar);
     if (capActive) lines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
@@ -162,7 +170,7 @@ module.exports = {
                 const streakMult  = getStreakMultiplier(streak);
                 const coinMult    = getCoinMultiplier(user);
                 const serverMult  = getServerCoinMultiplier(guildSettings);
-                const estNext     = Math.round(dailyAmount * clampMultiplier(streakMult * coinMult * serverMult));
+                const estNext     = Math.round(dailyAmount * clampMultiplier(streakMult * coinMult * serverMult * petDailyMultiplier(user)));
 
                 const topDrop = DROP_TABLE.reduce((best, d) => d.weight > best.weight ? d : best, DROP_TABLE[0]);
                 const nextRewardPreview = `Coming tomorrow: **~${estNext.toLocaleString()} coins** · possible ${topDrop.emoji} ${topDrop.name} drop`;
@@ -314,7 +322,8 @@ module.exports = {
             const streakMult   = getStreakMultiplier(user.streak?.current ?? 0);
             const coinMult     = getCoinMultiplier(user);
             const serverMult   = getServerCoinMultiplier(guildSettings);
-            const rawCombined  = streakMult * coinMult * serverMult;
+            const petMult      = petDailyMultiplier(user);
+            const rawCombined  = streakMult * coinMult * serverMult * petMult;
             const combined     = clampMultiplier(rawCombined);
             const actualAmount = Math.round(dailyAmount * combined);
             const capActive    = rawCombined > MAX_COMBINED_MULTIPLIER;
@@ -472,7 +481,7 @@ module.exports = {
                 .setTitle(getStreakTitle(streakCurrent, isMilestone))
                 .setDescription(
                     getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
-                    buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, updated.balance, capActive, droppedItem, isMilestone, streakCurrent, currency)
+                    buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, updated.balance, capActive, droppedItem, isMilestone, streakCurrent, currency, petMult)
                 )
                 .setFooter({ text: rankText })
                 .setTimestamp();
@@ -628,7 +637,7 @@ module.exports = {
                         : updated.balance;
                     rewardEmbed.setDescription(
                         getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
-                        buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, finalBalance, capActive, droppedItem, isMilestone, streakCurrent, currency)
+                        buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, finalBalance, capActive, droppedItem, isMilestone, streakCurrent, currency, petMult)
                     );
                     const winChallengeEmbed = new EmbedBuilder()
                         .setColor(COLORS.PRIZE)

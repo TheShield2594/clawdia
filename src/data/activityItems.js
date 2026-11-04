@@ -145,7 +145,7 @@ function isUploadableItemId(itemId) {
 const PET_NAMESPACE = 'pet';
 const PET_SPECIES_IDS = [
     // ownable companions (PET_DEFINITIONS)
-    'dog', 'cat', 'bird', 'fish', 'fox', 'wolf',
+    'dog', 'cat', 'bird', 'fish', 'fox', 'wolf', 'hamster', 'goat', 'badger',
     'eagle', 'shark', 'crystal_fox', 'lantern_owl',
     // wild battle opponents (makeWildPet)
     'wild_boar', 'feral_cat', 'stray_hound', 'cave_bat',

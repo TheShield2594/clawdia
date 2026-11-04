@@ -14,6 +14,7 @@ const {
     PET_MAX_LEVEL,
     WILD_PET_IDS,
     SPECIES_MOVES,
+    PERSONALITY_KEYS,
     getSpeciesMove,
     RARE_COMBAT_EDGE,
     TRAIN_MAX_SESSIONS,
@@ -222,7 +223,7 @@ describe('personality balance', () => {
     // Personality is rolled once at adoption and never changes, so no roll may
     // be a lasting handicap. Every pairing, both seats, at low, mid and high
     // level, stays within 42–58% (the tuning keeps it near ±4%).
-    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+    const KEYS = PERSONALITY_KEYS;
 
     test.each([1, 15, 28])('every pairing is close to even at level %i', (level) => {
         const rng = seededRng(0xBA1A + level);
@@ -246,7 +247,7 @@ describe('personality balance', () => {
 });
 
 describe('training balance (#1182)', () => {
-    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+    const KEYS = PERSONALITY_KEYS;
     const FULL = { power: TRAIN_MAX_SESSIONS, guard: TRAIN_MAX_SESSIONS, agility: TRAIN_MAX_SESSIONS };
 
     // Seat-balanced win rate of `x` against `y` over 2N fights.

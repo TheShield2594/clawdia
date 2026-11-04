@@ -124,6 +124,24 @@ describe('the claim', () => {
         expect(mockUsers.get(USER_ID).balance).toBeGreaterThan(1000);
     });
 
+    // The Hamster's daily_coins passive (+5% at level 1) joins the combined
+    // multiplier; a hungry one gives nothing, like every other passive.
+    it('adds a fed Hamster\'s daily-coins passive, and not a hungry one\'s', async () => {
+        const { createPet } = require('../src/services/petService');
+        seedUser({ pets: [createPet('hamster')] });
+        seedGuild({ dailyAmount: 1000 });
+        const interaction = makeInteraction();
+        await daily.execute(interaction);
+        expect(mockUsers.get(USER_ID).balance).toBe(1050);
+        expect(repliedText(interaction)).toContain('🐹');
+
+        mockUsers.reset();
+        const hungry = { ...createPet('hamster'), hunger: 10, starving: true, lastDecayAt: new Date() };
+        seedUser({ pets: [hungry] });
+        await daily.execute(makeInteraction());
+        expect(mockUsers.get(USER_ID).balance).toBe(1000);
+    });
+
     it('falls back to a default amount when the guild has no economy settings', async () => {
         seedUser();
         // No Guild document at all — a fresh server that has never opened the
