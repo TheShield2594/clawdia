@@ -19,6 +19,7 @@ useMongo();
 
 const User = require('../../src/models/User');
 const { __test__: { canonical } } = require('../../src/models/petWrites');
+const { recordMissionDeal } = require('../../src/models/seasonWrites');
 
 const filter = { userId: 'u1', guildId: 'g1' };
 
@@ -136,6 +137,86 @@ describe('a save writes only what the flow changed in the pet arrays', () => {
         expect(byName(after, 'Tom').level).toBe(9);
     });
 
+    test('a rare drop goes out in the same write as the rest of the save', async () => {
+        const user = await seed({ balance: 0 });
+        await concurrentWriters();
+        const writes = [];
+        const real = User.updateOne.bind(User);
+        const spy = jest.spyOn(User, 'updateOne').mockImplementation((...a) => { writes.push(a); return real(...a); });
+        try {
+            user.balance = 250;
+            user.pets.push({ petId: 'eagle', name: 'Sky' });
+            user.markModified('pets');
+            await user.save();
+        } finally {
+            spy.mockRestore();
+        }
+        // Nothing after the save: the push rode the save's own update, so a
+        // failure cannot store the hunt and drop the pet, or the other way round.
+        expect(writes).toHaveLength(0);
+        const after = await stored();
+        expect(after.balance).toBe(250);
+        expect(after.pets.map(p => p.name).sort()).toEqual(['Red', 'Rex', 'Sky', 'Tom']);
+    });
+
+    test('field edits on a marked array also go out with the save, as per-field paths', async () => {
+        const user = await seed();
+        await concurrentWriters();
+        const writes = [];
+        const real = User.updateOne.bind(User);
+        const spy = jest.spyOn(User, 'updateOne').mockImplementation((...a) => { writes.push(a); return real(...a); });
+        try {
+            user.pets[1].level = 4;
+            user.markModified('pets');
+            await user.save();
+        } finally {
+            spy.mockRestore();
+        }
+        expect(writes).toHaveLength(0);
+        expect(byName(await stored(), 'Tom')).toMatchObject({ level: 4, potw: true });
+    });
+
+    test('a runaway leaves the pets list and enters the memorial in one write', async () => {
+        const user = await seed();
+        const gone = user.pets[0].toObject();
+        delete gone._id;
+        user.deceasedPets.unshift({ ...gone, diedAt: new Date() });
+        user.markModified('deceasedPets');
+        user.pets.pull(user.pets[0]._id);
+        user.pets[0].hunger = 25;
+        user.markModified('pets');
+
+        const real = User.updateOne.bind(User);
+        const spy = jest.spyOn(User, 'updateOne').mockImplementation((f, u, o) => (
+            u.$pull ? Promise.reject(new Error('write failed')) : real(f, u, o)
+        ));
+        try {
+            await expect(user.save()).rejects.toThrow('write failed');
+        } finally {
+            spy.mockRestore();
+        }
+        // Not half done: the pet is still a pet, and no memorial record was made.
+        const after = await stored();
+        expect(after.pets.map(p => p.name)).toContain('Rex');
+        expect(after.deceasedPets.map(p => p.name)).toEqual(['Red']);
+    });
+
+    test('a full memorial is trimmed against what is stored, not pulled from the snapshot', async () => {
+        const dead = Array.from({ length: User.DECEASED_PET_LIMIT }, (_, i) => ({ petId: 'dog', name: `Old${i}` }));
+        const user = await seed({ deceasedPets: dead });
+        // A revive takes one record while the runaway is being worked out.
+        await User.updateOne(filter, { $pull: { deceasedPets: { name: 'Old1' } } });
+
+        user.deceasedPets.unshift({ petId: 'cat', name: 'Newest', diedAt: new Date() });
+        user.deceasedPets = user.deceasedPets.slice(0, User.DECEASED_PET_LIMIT);
+        user.markModified('deceasedPets');
+        await user.save();
+
+        // The tail record the snapshot would have trimmed still fits, so it stays.
+        const names = (await stored()).deceasedPets.map(p => p.name);
+        expect(names).toEqual(['Newest', 'Old0', 'Old2', 'Old3', 'Old4']);
+    });
+
     test('nested fields such as training are written', async () => {
         const user = await seed();
         user.pets[0].training = { power: 2, guard: 1, agility: 0 };
@@ -163,15 +244,23 @@ describe('the guards around it still hold', () => {
         expect(byName(await stored(), 'Rex').hunger).toBe(100);
     });
 
-    test('a pet write that fails rejects the save', async () => {
+    test('a pet write that fails rejects the save, after the season commit has run', async () => {
         const user = await seed();
+        // An edit with an adoption is the shape that needs a write after the save.
         user.pets[0].hunger = 5;
-        const spy = jest.spyOn(User, 'updateOne').mockRejectedValueOnce(new Error('write failed'));
+        user.pets.push({ petId: 'wolf', name: 'Ghost' });
+        const dealt = new Date('2026-11-05T00:00:00Z');
+        recordMissionDeal(user, [], dealt);
+        const real = User.updateOne.bind(User);
+        const spy = jest.spyOn(User, 'updateOne').mockImplementation((f, u, o) => (
+            JSON.stringify(u).includes('$[') ? Promise.reject(new Error('write failed')) : real(f, u, o)
+        ));
         try {
             await expect(user.save()).rejects.toThrow('write failed');
         } finally {
             spy.mockRestore();
         }
+        expect((await stored()).seasonMissionsDate).toEqual(dealt);
     });
 
     test('a new document is inserted with its pets', async () => {

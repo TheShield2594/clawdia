@@ -5,37 +5,47 @@
 // `pets` and `deceasedPets` used to go back to the database as whole arrays.
 // Every /pet command called `markModified('pets')`, and even without it
 // Mongoose writes the whole array when one save both edits a pet and adds or
-// removes one (a runaway, an adoption, a rare drop on top of hunger decay).
-// A whole-array `$set` is the snapshot the command read, so it erased what the
+// removes one (a runaway, a splice, an adoption on top of hunger decay). A
+// whole-array `$set` is the snapshot the command read, so it erased what the
 // atomic pet writers did in between: the Pet of the Week ribbon and weekly
 // counter reset, a ladder title, a PvP battle claim, the hunger-warning flags —
 // and a pet that /use revive_scroll pushed was removed outright, the scroll
 // already spent. `optimisticConcurrency` cannot catch it: atomic updates do
 // not bump `__v` (see the note on it in User.js).
 //
-// So the arrays are taken out of the save, the way `activeEffects` and the
-// season fields are, and committed after it as writes that name each pet by
-// `_id` and each field by name:
+// What changed is worked out against a snapshot taken when the document was
+// loaded (`snapshotPetArrays`, from a post-init hook), and written one of
+// three ways, preferring whatever keeps it inside the save's own update:
 //
-//   1. `$set` the fields that changed, per pet, through arrayFilters on `_id`
-//   2. `$pull` the pets the flow removed, by `_id`
-//   3. `$push` the pets the flow added, unless a pet with that `_id` is there
+//   1. Left to Mongoose, when its own write is already per entry: a lone
+//      `$push` or `$pull`, or field edits by index with the array itself
+//      unmarked. A rare drop or an adoption is therefore one write with the
+//      rest of the save, as it always was.
+//
+//   2. Field edits only, with the array marked whole (what `markModified`
+//      does): rewritten as the same per-field index paths, so they too ride
+//      the save's own update. Indexes are safe here: no atomic writer removes
+//      or reorders pets (they set fields, or `$push` at the end), and a save
+//      that removed one bumped `__v`, which this save's version check catches.
+//
+//   3. Anything else (edits together with an addition or removal, a splice,
+//      a runaway): taken out of the save and committed after it, naming each
+//      pet by `_id` —
+//        a. `$set` the changed fields, through arrayFilters on `_id`;
+//        b. `$pull` removed pets together with the memorial `$push`, in one
+//           update, so a runaway is never out of both arrays;
+//        c. `$push` added pets, unless one with that `_id` is already there.
+//      These run after the save lands, so a save that loses a version race
+//      commits none of them, and each is safe to replay. Unlike the effect and
+//      season commits they throw (after those have run): a pet that was not
+//      added is a failure the caller has to answer.
 //
 // A field another writer changed and this flow did not is left alone; a pet
 // another writer added or removed stays added or removed. Two writers that
 // change the *same* field still race, last write wins, as with any `$set`.
 //
-// What changed is worked out against a snapshot taken when the document was
-// loaded (`snapshotPetArrays`, from a post-init hook). A document with no
-// snapshot, such as one built with `new User(...)` and not yet inserted, is
-// left to Mongoose: its insert is the first write, with nothing stored to
-// overwrite.
-//
-// The three writes are made after the save lands, so a save that loses a
-// version race commits none of them and a retry recomputes them from a fresh
-// read. Unlike the effect and season writes they *do* throw: a pet that was
-// adopted but not pushed is a failure the caller has to answer (/pet adopt
-// refunds its fee on one), not something to log and carry on from.
+// A document with no snapshot, such as one built with `new User(...)`, is left
+// to Mongoose: its insert is the first write, with nothing stored to overwrite.
 
 const SNAPSHOT_KEY = 'petSnapshot';
 
@@ -118,104 +128,129 @@ function snapshotPetArrays(doc, limit) {
 }
 
 /**
- * The writes that take one array from its snapshot to its current state:
- * `{ sets, unsets, filters, pulls, pushes }`, or null when nothing changed.
+ * How one array differs from its snapshot: `edits` ({ index, id, key }),
+ * `pulls` (ids), `pushes` (plain entries), and whether the surviving entries
+ * are still in their loaded order. Null when nothing differs.
+ *
+ * An array with a `slice` limit (the memorial) never pulls: the only entries
+ * a flow drops from it are the ones its own trim pushes out of the limit, and
+ * the `$push`'s `$slice` does that trim against what is stored, so a record a
+ * concurrent revive already took cannot make it pull one the limit would keep.
  */
-function diffArray(path, snap, current, spec, tag) {
-    const sets = {}, unsets = {}, filters = [], pulls = [], pushes = [];
-    const now = new Map();
+function diffArray(snap, current, spec) {
+    const edits = [], pulls = [], pushes = [], ids = [];
+    let index = 0;
     for (const entry of current ?? []) {
         const data = plain(entry);
+        const at = index++;
         if (data._id == null) continue;
-        now.set(String(data._id), data);
-    }
-
-    let n = 0;
-    for (const [id, data] of now) {
+        const id = String(data._id);
+        ids.push(id);
         const before = snap.byId.get(id);
         if (!before) { pushes.push(data); continue; }
-        const changed = [];
         for (const key of new Set([...Object.keys(before), ...Object.keys(data)])) {
             if (key === '_id') continue;
-            if (canonical(data[key]) !== before[key]) changed.push(key);
-        }
-        if (!changed.length) continue;
-        const ident = `${tag}${n++}`;
-        filters.push({ [`${ident}._id`]: data._id });
-        for (const key of changed) {
-            if (data[key] === undefined) unsets[`${path}.$[${ident}].${key}`] = '';
-            else sets[`${path}.$[${ident}].${key}`] = data[key];
+            if (canonical(data[key]) !== before[key]) edits.push({ index: at, id, key, value: data[key] });
         }
     }
-    for (const id of snap.order) {
-        if (!now.has(id)) pulls.push(id);
+    const now = new Set(ids);
+    if (spec.slice == null) {
+        for (const id of snap.order) if (!now.has(id)) pulls.push(id);
     }
-
-    if (!filters.length && !pulls.length && !pushes.length) return null;
-    return { path, spec, sets, unsets, filters, pulls, pushes };
+    if (!edits.length && !pulls.length && !pushes.length) return null;
+    const kept = snap.order.filter(id => now.has(id));
+    const inOrder = kept.length === ids.length && kept.every((id, i) => id === ids[i]);
+    return { edits, pulls, pushes, inOrder };
 }
 
-/** Whether anything at or under `path` is waiting to be saved. */
-function touched(doc, path) {
-    return typeof doc.isModified === 'function' && doc.isModified(path);
+/** Every pending path at or under `path`. */
+function pendingUnder(doc, path) {
+    const defaults = doc.$__?.activePaths?.getStatePaths?.('default') ?? {};
+    const all = new Set([
+        ...(doc.modifiedPaths?.({ includeChildren: true }) ?? []),
+        ...(doc.directModifiedPaths?.() ?? []),
+        ...Object.keys(defaults),
+    ]);
+    return [...all].filter(p => p === path || p.startsWith(`${path}.`));
+}
+
+/** Whether Mongoose's own write for `path` will already be per entry (way 1). */
+function mongooseWritesPerEntry(doc, path) {
+    const ops = (doc.get(path)?.$__getAtomics?.() ?? []).map(([op]) => op);
+    // Direct changes only: a pushed entry's own defaults are not edits.
+    const direct = doc.directModifiedPaths?.() ?? [];
+    const childEdits = direct.some(p => p.startsWith(`${path}.`));
+    const marked = direct.includes(path);
+    // A lone $push or $pull, even with the array marked (Mongoose still sends
+    // the atomic), as long as no entry was also edited.
+    if (!childEdits && ops.length === 1 && (ops[0] === '$push' || ops[0] === '$pull')) return true;
+    // Edits by index, with the array itself untouched.
+    return childEdits && !marked && !ops.includes('$push') && !ops.includes('$pull');
 }
 
 /**
- * Take the pet arrays out of the pending `save()` of a loaded document, and
- * hand back the writes for `applyPetWrites` to commit once the save lands.
+ * Settle the pet arrays' part of the pending `save()` of a loaded document:
+ * leave it to Mongoose, narrow it to per-field paths, or take it out and hand
+ * it back for `applyPetWrites` to commit once the save lands.
  *
- * @returns {Array|null} one entry per array that changed, or null
+ * @returns {Array|null} the writes to commit after the save, or null
  */
 function detachPetWrites(doc, limit) {
     if (!doc || doc.isNew) return null;
     const snap = doc.$locals?.[SNAPSHOT_KEY];
     if (!snap) return null;
 
-    const specs = arraySpecs(limit);
     const out = [];
-    const detached = [];
-    for (const [path, spec] of Object.entries(specs)) {
-        if (!(path in snap) || !touched(doc, path)) continue;
+    for (const [path, spec] of Object.entries(arraySpecs(limit))) {
+        if (!(path in snap) || !(typeof doc.isModified === 'function' && doc.isModified(path))) continue;
         if (snap[path] === null) {
             // Ids made up on load (see snapshotOf): write the array whole this
             // once, which stores them.
             doc.markModified(path);
             continue;
         }
-        const diff = diffArray(path, snap[path], doc.get(path), spec, path === 'pets' ? 'p' : 'd');
-        if (diff) out.push(diff);
-        detached.push(path);
-    }
-    if (!detached.length) return null;
+        if (mongooseWritesPerEntry(doc, path)) continue;
 
-    const defaults = doc.$__?.activePaths?.getStatePaths?.('default') ?? {};
-    const pending = new Set([
-        ...(doc.modifiedPaths?.({ includeChildren: true }) ?? []),
-        ...(doc.directModifiedPaths?.() ?? []),
-        ...Object.keys(defaults),
-    ]);
-    for (const p of pending) {
-        if (detached.some(path => p === path || p.startsWith(`${path}.`))) doc.unmarkModified(p);
+        const diff = diffArray(snap[path], doc.get(path), spec);
+        for (const p of pendingUnder(doc, path)) doc.unmarkModified(p);
+        if (!diff) continue;
+
+        if (!diff.pulls.length && !diff.pushes.length && diff.inOrder) {
+            // Way 2: the same edits as per-field index paths in this save.
+            for (const { index, key } of diff.edits) doc.markModified(`${path}.${index}.${key}`);
+            continue;
+        }
+        out.push({ path, spec, ...diff });
     }
     return out.length ? out : null;
 }
 
 /**
- * Commit detached pet writes: field sets, then removals, then additions. Each
- * names its pets by `_id`, so a pet another writer moved, added or removed in
- * the meantime is matched or left alone rather than overwritten.
+ * Commit the writes detachPetWrites took out of a save (way 3). Each names its
+ * pets by `_id`, so a pet another writer moved, added or removed in the
+ * meantime is matched or left alone rather than overwritten.
  *
- * Throws on a failed write, so the caller's `save()` rejects.
+ * Throws on a failed write.
  */
 async function applyPetWrites(Model, filter, writes) {
     if (!writes?.length) return;
+    const toId = toObjectId(Model);
 
+    // a. Field edits, one arrayFilter per pet.
     const $set = {}, $unset = {}, arrayFilters = [];
-    for (const w of writes) {
-        Object.assign($set, w.sets);
-        Object.assign($unset, w.unsets);
-        arrayFilters.push(...w.filters);
-    }
+    writes.forEach((w, wi) => {
+        const idents = new Map();
+        for (const { id, key, value } of w.edits) {
+            if (!idents.has(id)) {
+                const ident = `e${wi}x${idents.size}`;
+                idents.set(id, ident);
+                arrayFilters.push({ [`${ident}._id`]: toId(id) });
+            }
+            const field = `${w.path}.$[${idents.get(id)}].${key}`;
+            if (value === undefined) $unset[field] = '';
+            else $set[field] = value;
+        }
+    });
     if (arrayFilters.length) {
         const update = {};
         if (Object.keys($set).length) update.$set = $set;
@@ -223,24 +258,37 @@ async function applyPetWrites(Model, filter, writes) {
         await Model.updateOne(filter, update, { arrayFilters });
     }
 
-    const $pull = {};
+    // b. Removals, with any push to a *different* array (a runaway's memorial
+    //    record), in one update. Guarded on that record not being there yet:
+    //    if it is, an earlier commit already made this same update, removal
+    //    included.
+    // c. Then pushes to the arrays that also had removals.
+    const pulled = new Set(writes.filter(w => w.pulls.length).map(w => w.path));
+    const update = {}, guard = {};
     for (const w of writes) {
-        if (w.pulls.length) $pull[w.path] = { _id: { $in: w.pulls.map(toObjectId(Model)) } };
+        if (w.pulls.length) (update.$pull ??= {})[w.path] = { _id: { $in: w.pulls.map(toId) } };
     }
-    if (Object.keys($pull).length) await Model.updateOne(filter, { $pull });
-
+    const later = [];
     for (const w of writes) {
         if (!w.pushes.length) continue;
-        const each = { $each: w.pushes };
-        if (w.spec.position != null) each.$position = w.spec.position;
-        if (w.spec.slice != null) each.$slice = w.spec.slice;
-        // Only while none of them is there yet, so a replayed commit cannot
-        // add a second copy.
+        if (pulled.has(w.path)) { later.push(w); continue; }
+        (update.$push ??= {})[w.path] = pushSpec(w);
+        guard[`${w.path}._id`] = { $nin: w.pushes.map(p => p._id) };
+    }
+    if (Object.keys(update).length) await Model.updateOne({ ...filter, ...guard }, update);
+    for (const w of later) {
         await Model.updateOne(
             { ...filter, [`${w.path}._id`]: { $nin: w.pushes.map(p => p._id) } },
-            { $push: { [w.path]: each } },
+            { $push: { [w.path]: pushSpec(w) } },
         );
     }
+}
+
+function pushSpec(w) {
+    const each = { $each: w.pushes };
+    if (w.spec.position != null) each.$position = w.spec.position;
+    if (w.spec.slice != null) each.$slice = w.spec.slice;
+    return each;
 }
 
 /** A string id back to the ObjectId the array stores, through the model's mongoose. */
@@ -249,4 +297,7 @@ function toObjectId(Model) {
     return id => (Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : id);
 }
 
-module.exports = { snapshotPetArrays, detachPetWrites, applyPetWrites, __test__: { canonical, diffArray, snapshotOf } };
+module.exports = {
+    snapshotPetArrays, detachPetWrites, applyPetWrites,
+    __test__: { canonical, diffArray, snapshotOf, mongooseWritesPerEntry },
+};

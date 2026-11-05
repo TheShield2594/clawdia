@@ -536,11 +536,12 @@ userSchema.pre('save', function() {
     // that landed in between.
     this.$locals.pendingSeasonWrites = detachSeasonWrites(this);
 
-    // `pets` and `deceasedPets` likewise: written as per-pet, per-field
-    // writes keyed by `_id` after the save, never as the whole array this
-    // document read (models/petWrites.js). A whole-array write erased the
-    // atomic pet writers' work — POTW, ladder titles, PvP battle claims,
-    // hunger-warning flags — and could remove a pet a revive had just added.
+    // `pets` and `deceasedPets` are never written as the whole array this
+    // document read (models/petWrites.js): per entry inside this save where
+    // Mongoose can, and otherwise as writes keyed by `_id` after it. A
+    // whole-array write erased the atomic pet writers' work — POTW, ladder
+    // titles, PvP battle claims, hunger-warning flags — and could remove a pet
+    // a revive had just added.
     this.$locals.pendingPetWrites = detachPetWrites(this, DECEASED_PET_LIMIT);
 
     const ids = (this.achievements || []).map(a => a.id);
@@ -559,14 +560,23 @@ userSchema.post('init', function() {
 
 userSchema.post('save', async function() {
     const filter = { userId: this.userId, guildId: this.guildId };
-    // Pets first, and the one commit here that throws: a pet write that did
-    // not land is a failed save to the caller (see models/petWrites.js).
+    // Pet writes the save could not carry itself (models/petWrites.js). The
+    // one commit here that fails the save — but only after the effect and
+    // season commits below have run, since the save they follow has landed.
     const petWrites = this.$locals.pendingPetWrites;
     this.$locals.pendingPetWrites = null;
-    if (petWrites) await applyPetWrites(this.constructor, filter, petWrites);
-    // What this document now holds is what is stored, so the next save of
-    // it diffs from here.
-    snapshotPetArrays(this, DECEASED_PET_LIMIT);
+    let petError = null;
+    if (petWrites) {
+        try {
+            await applyPetWrites(this.constructor, filter, petWrites);
+        } catch (err) {
+            petError = err;
+        }
+    }
+    // What this document now holds is what is stored, so the next save of it
+    // diffs from here. Not after a failed pet write: a retry diffs from the
+    // old snapshot again, and every pet write is safe to repeat.
+    if (!petError) snapshotPetArrays(this, DECEASED_PET_LIMIT);
     const spends = this.$locals.pendingEffectSpends;
     if (spends) {
         this.$locals.pendingEffectSpends = null;
@@ -577,6 +587,7 @@ userSchema.post('save', async function() {
         this.$locals.pendingSeasonWrites = null;
         await applySeasonWrites(this.constructor, filter, seasonOps);
     }
+    if (petError) throw petError;
 });
 
 module.exports = model('User', userSchema);
