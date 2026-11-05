@@ -1,6 +1,7 @@
 const { Schema, model } = require('mongoose');
 const { detachEffectWrites, applyEffectSpends } = require('./effectSpends');
 const { detachSeasonWrites, applySeasonWrites } = require('./seasonWrites');
+const { snapshotPetArrays, detachPetWrites, applyPetWrites } = require('./petWrites');
 
 // How many starved pets are retained for revival, most recent first.
 const DECEASED_PET_LIMIT = 5;
@@ -535,6 +536,13 @@ userSchema.pre('save', function() {
     // that landed in between.
     this.$locals.pendingSeasonWrites = detachSeasonWrites(this);
 
+    // `pets` and `deceasedPets` likewise: written as per-pet, per-field
+    // writes keyed by `_id` after the save, never as the whole array this
+    // document read (models/petWrites.js). A whole-array write erased the
+    // atomic pet writers' work — POTW, ladder titles, PvP battle claims,
+    // hunger-warning flags — and could remove a pet a revive had just added.
+    this.$locals.pendingPetWrites = detachPetWrites(this, DECEASED_PET_LIMIT);
+
     const ids = (this.achievements || []).map(a => a.id);
     if (new Set(ids).size !== ids.length) {
         throw new Error('User achievements contains duplicate id values');
@@ -545,8 +553,20 @@ userSchema.pre('save', function() {
 // XP, tier claims and mission progress — now that the save has landed: save
 // first, then these, as utils/balanceDelta.js does for coins, so a save that
 // fails commits nothing. Neither `apply*` function throws.
+userSchema.post('init', function() {
+    snapshotPetArrays(this, DECEASED_PET_LIMIT);
+});
+
 userSchema.post('save', async function() {
     const filter = { userId: this.userId, guildId: this.guildId };
+    // Pets first, and the one commit here that throws: a pet write that did
+    // not land is a failed save to the caller (see models/petWrites.js).
+    const petWrites = this.$locals.pendingPetWrites;
+    this.$locals.pendingPetWrites = null;
+    if (petWrites) await applyPetWrites(this.constructor, filter, petWrites);
+    // What this document now holds is what is stored, so the next save of
+    // it diffs from here.
+    snapshotPetArrays(this, DECEASED_PET_LIMIT);
     const spends = this.$locals.pendingEffectSpends;
     if (spends) {
         this.$locals.pendingEffectSpends = null;
