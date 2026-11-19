@@ -689,10 +689,12 @@ malformed config disables the connector, it never stops the bot from starting.
   it is added whenever a server is configured, not only when in-channel actions
   are on.
 - The bot's own in-channel actions — `create_poll`, `create_reminder`,
-  `save_memory`, and `suggest_mod_action` for moderators — are offered as tools
+  `save_memory`, `suggest_mod_action` for moderators, and `review_server_layout`
+  and `apply_layout` for members with Manage Channels — are offered as tools
   alongside the servers' wherever the bot runs the tool loop, so they get the
   same schema validation, approval buttons and reply footer. `save_memory` always
-  asks before it writes. They do not appear in the Connections panel's usage
+  asks before it writes, and so does `apply_layout`, whose prompt shows the plan
+  in plain words rather than as JSON. They do not appear in the Connections panel's usage
   ledger, which counts servers an admin configured. On Claude's own MCP connector
   the bot never sees a tool call, so there they stay on the older trailing-ACTION
   text protocol.

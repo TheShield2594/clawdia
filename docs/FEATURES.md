@@ -383,6 +383,42 @@ to said about themselves, but nobody reviews it. It needs AI actions on.
 A scheduled task carries the memories of the person who set it up, so "plan my
 week" knows whose week it is.
 
+**Server layout:**
+
+With AI actions on, a member with **Manage Channels** can ask Clawdia to change
+the server itself: "redo the channel layout", "make a private mods category",
+"post this in #announcements". She gets two tools:
+
+- `review_server_layout` reads the categories, channels, roles, and the system
+  and AFK channels as they stand, with ids. Name one channel to see its
+  permission overwrites. It changes nothing and asks nobody.
+- `apply_layout` runs one plan of up to 40 ordered steps. A step can create,
+  rename, move, reorder or delete categories and channels; set topics, slowmode
+  and age restriction; set or remove permission overwrites; post a message in a
+  channel; create or restyle roles; or rename the server and set its system and
+  AFK channels. Later steps can name channels that earlier steps create.
+
+Before anything changes, the approval prompt shows the whole plan in plain words
+and warns about deletes. Nothing runs until someone clicks **Run it**. Clicking
+it doesn't skip any checks: each step checks the requester's own permissions
+again when it runs.
+
+- Structure needs Manage Channels.
+- Overwrites need Manage Permissions in that channel, and only for permissions
+  the requester has there.
+- Roles need Manage Roles and must sit below the requester's highest role.
+  Roles are always created with no permissions, and a plan can't change any
+  role's permissions. Do that in Server Settings.
+- Server settings need Manage Server.
+- A post needs the requester to be able to send there. It can only ping
+  `@everyone` or roles if they could themselves.
+
+A plan that is malformed is refused whole, before any change. Otherwise a step
+that fails doesn't stop the others, and the model is told which steps landed and
+why the rest didn't. Clawdia won't delete the channel the conversation is in.
+Scheduled tasks can't run `apply_layout`, because there is nobody there to
+approve it.
+
 **Learning**:
 
 With **Let the AI learn** on, the model gets a `learn` tool. After it finishes

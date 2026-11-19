@@ -365,6 +365,14 @@ function buildBotTools(message, { enabled = true, ai = null } = {}) {
     if (canManage) tools.push(scheduleTaskTool(message));
     if (canModerate) tools.push(modSuggestionTool(message));
 
+    // Reviewing and changing the server's layout, for someone with Manage
+    // Channels. Every write goes through one approved plan, and each step is
+    // checked again against the asker's own permissions when it runs.
+    // Required here rather than at the top: it reads discord.js's enums at load,
+    // and this module is pulled in by plenty that never reach a guild turn.
+    const { buildLayoutTools } = require('./serverLayout');
+    tools.push(...buildLayoutTools(message, tool));
+
     return tools;
 }
 

@@ -590,7 +590,10 @@ async function prepareMcpToolkit(guildServers = [], {
             annotations: definition.annotations,
             confirm: definition.confirm,
             structured: false,
-            run: botTool.run
+            run: botTool.run,
+            // A bot tool can say what a call will do in words, for the approval
+            // prompt, where a long JSON payload is not something anyone reads.
+            preview: typeof botTool.preview === 'function' ? botTool.preview : null
         });
     }
 
@@ -784,9 +787,21 @@ async function prepareMcpToolkit(guildServers = [], {
             };
         }
 
+        // The preview is written by the bot from the arguments, not by the
+        // model; one that throws just leaves the prompt with the raw JSON.
+        let preview;
+        if (typeof target.preview === 'function') {
+            try {
+                const text = target.preview(args ?? {});
+                if (typeof text === 'string' && text.trim()) preview = text;
+            } catch (err) {
+                console.warn(`[MCP] preview for "${describe.tool}" failed: ${err.message}`);
+            }
+        }
+
         let decision;
         try {
-            decision = await confirmTool({ ...describe, args, annotations: target.annotations });
+            decision = await confirmTool({ ...describe, args, annotations: target.annotations, ...(preview ? { preview } : {}) });
         } catch (err) {
             // A transport that fell over mid-prompt has not approved anything.
             console.warn(`[MCP] approval for "${describe.tool}" failed: ${err.message}`);
