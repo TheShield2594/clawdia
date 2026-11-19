@@ -39,6 +39,11 @@ const MAX_ARGS_CHARS = 500;
 // partial without anybody knowing.
 const ARGS_FILE_NAME = 'arguments.json';
 
+// A tool's own plain-words account of a call (the bot's apply_layout), shown in
+// place of the JSON. Long enough for a whole layout plan, short enough that the
+// heading and the footer still fit under Discord's 2,000-character message.
+const MAX_PREVIEW_CHARS = 1600;
+
 // Past this, the file is the problem rather than the answer: a megabyte of JSON
 // is not something anybody reads off a phone before clicking, and holding it to
 // post it is a cost per prompt. The preview still says what it left out, and
@@ -77,6 +82,20 @@ function renderArgs(args) {
     const hidden = total - Buffer.byteLength(shown, 'utf8');
     const body = `${shown}\n… (truncated — ${hidden} of ${total} bytes not shown)`;
     return `\n\`\`\`json\n${body}\n\`\`\``;
+}
+
+/**
+ * A tool's plain-words preview, cut to fit, saying so when it is cut.
+ *
+ * Mentions in it cannot ping — the send's allowedMentions sees to that — and it
+ * is the bot's own wording of the arguments, so it is shown as text rather than
+ * fenced as data.
+ */
+function renderPreview(preview) {
+    const text = String(preview);
+    if (text.length <= MAX_PREVIEW_CHARS) return `\n${text}`;
+    const shown = clip(text, MAX_PREVIEW_CHARS);
+    return `\n${shown}\n… (the rest of the plan is not shown here)`;
 }
 
 // `text` cut to `limit` UTF-16 units without splitting a surrogate pair: half
@@ -152,12 +171,16 @@ function buttons(disabled = false) {
 function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS, approver = 'requester' } = {}) {
     const managersOnly = approver === 'managers';
 
-    return async ({ server, tool, args, annotations }) => {
+    return async ({ server, tool, args, annotations, preview }) => {
         const heading = `<@${message.author.id}> — run \`${toolLabel(server)} · ${toolLabel(tool)}\`?${describeTool(annotations)}`;
         const file = argsAttachment(args);
-        const content = `🔧 ${heading}${renderArgs(args)}${
-            file ? `\n-# The preview above is cut short — the full arguments are attached as \`${ARGS_FILE_NAME}\`.` : ''
-        }`;
+        const content = typeof preview === 'string' && preview
+            ? `🔧 ${heading}${renderPreview(preview)}${
+                file ? `\n-# The full arguments are attached as \`${ARGS_FILE_NAME}\`.` : ''
+            }`
+            : `🔧 ${heading}${renderArgs(args)}${
+                file ? `\n-# The preview above is cut short — the full arguments are attached as \`${ARGS_FILE_NAME}\`.` : ''
+            }`;
 
         const prompt = await message.channel.send({
             content,
@@ -248,4 +271,4 @@ function createUnattendedConfirmer(mcpServers, { botServer = 'clawdia', useAllow
     };
 }
 
-module.exports = { createToolConfirmer, createUnattendedConfirmer, CONFIRM_TIMEOUT_MS, renderArgs, argsAttachment, MAX_ARGS_CHARS, ARGS_FILE_NAME };
+module.exports = { createToolConfirmer, createUnattendedConfirmer, CONFIRM_TIMEOUT_MS, renderArgs, renderPreview, argsAttachment, MAX_ARGS_CHARS, MAX_PREVIEW_CHARS, ARGS_FILE_NAME };
