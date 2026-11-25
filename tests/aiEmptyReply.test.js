@@ -32,11 +32,13 @@ jest.mock('../src/services/ai/providers', () => ({
 
 const mockStream = jest.fn();
 const mockComplete = jest.fn();
+let mockConfig = {};
 jest.mock('../src/services/ai', () => ({
     resolveProviderConfig: () => ({
         provider: 'mock', model: 'mock-1', temperature: 0.7, maxTokens: 1024,
         apiKey: 'k', baseUrl: null, mcpServers: [],
-        rateLimit: { perUser: 0, perChannel: 0, windowMin: 10 }
+        rateLimit: { perUser: 0, perChannel: 0, windowMin: 10 },
+        ...mockConfig
     }),
     streamCompletion: (...args) => mockStream(...args),
     getCompletion: (...args) => mockComplete(...args),
@@ -74,7 +76,7 @@ function fakeMessage({ manageChannels = false } = {}) {
     return { message, sent };
 }
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => { jest.clearAllMocks(); mockConfig = {}; });
 
 test('a streamed turn with no text says so instead of leaving the placeholder', async () => {
     mockStream.mockImplementation(async function* () {});
@@ -88,6 +90,24 @@ test('an unstreamed turn with no text says why rather than "(empty response)"', 
     const { message, sent } = fakeMessage();
     await handleAIChat(message, { provider: 'mock', streaming: false, actionsEnabled: false, maxHistory: 20 });
     expect(sent.map(m => m.content).join('\n')).toMatch(/ran out of room/);
+    // Shown, not kept: the note is not something the model said.
+    expect(require('../src/services/ai/history').appendHistory).not.toHaveBeenCalled();
+});
+
+test('a whitespace-only completion counts as empty', async () => {
+    mockComplete.mockResolvedValue(' \n ');
+    const { message, sent } = fakeMessage();
+    await handleAIChat(message, { provider: 'mock', streaming: false, actionsEnabled: false, maxHistory: 20 });
+    expect(sent.map(m => m.content).join('\n')).toMatch(/ran out of room/);
+    expect(require('../src/services/ai/history').appendHistory).not.toHaveBeenCalled();
+});
+
+test('the layout budget stops at a model\'s output ceiling', async () => {
+    mockConfig = { provider: 'openai', model: 'gpt-4-turbo' };
+    mockStream.mockImplementation(async function* () { yield 'ok'; });
+    const { message } = fakeMessage({ manageChannels: true });
+    await handleAIChat(message, { provider: 'mock', streaming: true, actionsEnabled: true, maxHistory: 20 });
+    expect(mockStream.mock.calls[0][0].maxTokens).toBe(4096);
 });
 
 test('a turn offered apply_layout gets a reply budget big enough for a plan', async () => {

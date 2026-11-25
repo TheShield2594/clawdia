@@ -14,6 +14,7 @@ const {
     fitPrompt,
     inputBudget,
     contextWindow,
+    maxOutputTokens,
     BACKGROUND_PRIORITY,
     RESOURCE_PRIORITY,
     GAME_DATA_PRIORITY,
@@ -399,10 +400,16 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // and never past half the model's window, which is all the input budget
     // reserves for a reply anyway.
     const offersLayout = toolActions && botTools.some(t => t.name === 'apply_layout');
-    const replyTokens = offersLayout
-        ? Math.max(Number(maxTokens) || 1024, Math.min(LAYOUT_REPLY_TOKENS,
-            Math.floor((Number(contextTokens) > 0 ? Number(contextTokens) : contextWindow(provider, model)) / 2)))
-        : maxTokens;
+    // Nor past the model's own output ceiling, where one is known: a request
+    // over it is refused outright, which would cost every turn the tool is
+    // offered on, not only the layout ones.
+    const configuredReply = Number(maxTokens) || 1024;
+    const layoutFloor = Math.min(
+        LAYOUT_REPLY_TOKENS,
+        Math.floor((Number(contextTokens) > 0 ? Number(contextTokens) : contextWindow(provider, model)) / 2),
+        maxOutputTokens(provider, model) ?? Infinity
+    );
+    const replyTokens = offersLayout ? Math.max(configuredReply, layoutFloor) : maxTokens;
 
     if (mcpActive) {
         // The ACTION sentence only belongs in the MCP rule while there is an
@@ -807,7 +814,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                 activity.reset();
                 return getCompletion(callArgs);
             }, { canRetry: () => !activity.ranTools });
-            response = response || EMPTY_REPLY_MESSAGE;
+            // Whitespace counts as nothing. The note is chosen for display only
+            // below: fullResponse stays empty so history and speech skip it.
+            const emptyReply = !String(response ?? '').trim();
+            if (emptyReply) response = '';
 
             if (aiSettings.actionsEnabled && !toolActions) {
                 const { cleanText, action } = extractAction(response);
@@ -838,6 +848,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                     tailMsg = await send(message.channel, chunks[i]);
                     tailText = chunks[i];
                 }
+            } else if (emptyReply && !withheld) {
+                tailMsg = await reply(message, EMPTY_REPLY_MESSAGE);
+                tailText = EMPTY_REPLY_MESSAGE;
             }
             if (!withheld) await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         }
