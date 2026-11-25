@@ -13,6 +13,8 @@ const { shouldSpeak, sendSpokenReply } = require('./speech');
 const {
     fitPrompt,
     inputBudget,
+    contextWindow,
+    maxOutputTokens,
     BACKGROUND_PRIORITY,
     RESOURCE_PRIORITY,
     GAME_DATA_PRIORITY,
@@ -51,6 +53,20 @@ const STATUS_REFRESH_INTERVAL_MS = 1200;
 // request that never returns cannot hold the reply open.
 const PAINT_LOCK_WAIT_MS = 2000;
 const PAINT_LOCK_TICK_MS = 25;
+
+// The reply budget a turn that can write a server layout gets at the least.
+// apply_layout takes the whole plan as one call — up to forty operations of
+// JSON — and the default 1024 tokens runs out partway through it, or before
+// it on a model that thinks first. A provider that stops on its budget hands
+// back no text and no complete call, so the turn ended on the review alone
+// with nothing said. This is a ceiling, not a spend: a turn that writes a short
+// answer is billed for the short answer.
+const LAYOUT_REPLY_TOKENS = 8192;
+
+// What a turn that produced nothing says, rather than posting a bare tool
+// footer (or nothing at all) and leaving the user to wonder.
+const EMPTY_REPLY_MESSAGE = 'I came back with nothing to say — most likely I ran out of room for the reply. '
+    + 'Try asking again, or ask an admin to raise the max reply tokens in the dashboard.';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -379,6 +395,22 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     const toolActions = botTools.length > 0 && clientTools;
     const offeredAgentTools = clientTools ? agentTools : [];
 
+    // A layout plan does not fit in an ordinary reply budget (see
+    // LAYOUT_REPLY_TOKENS). Raised only for a turn that is offered the tool,
+    // and never past half the model's window, which is all the input budget
+    // reserves for a reply anyway.
+    const offersLayout = toolActions && botTools.some(t => t.name === 'apply_layout');
+    // Nor past the model's own output ceiling, where one is known: a request
+    // over it is refused outright, which would cost every turn the tool is
+    // offered on, not only the layout ones.
+    const configuredReply = Number(maxTokens) || 1024;
+    const layoutFloor = Math.min(
+        LAYOUT_REPLY_TOKENS,
+        Math.floor((Number(contextTokens) > 0 ? Number(contextTokens) : contextWindow(provider, model)) / 2),
+        maxOutputTokens(provider, model) ?? Infinity
+    );
+    const replyTokens = offersLayout ? Math.max(configuredReply, layoutFloor) : maxTokens;
+
     if (mcpActive) {
         // The ACTION sentence only belongs in the MCP rule while there is an
         // ACTION block to be talked into emitting; the tool route's own addendum
@@ -480,7 +512,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             history: rawHistory,
             prompt: promptText,
             images: vision.images.length,
-            budget: inputBudget({ provider, model, maxTokens, contextTokens })
+            budget: inputBudget({ provider, model, maxTokens: replyTokens, contextTokens })
         });
         const { report } = fitted;
         if (report.estimatedBefore > report.budget) {
@@ -528,7 +560,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             // The provider filters these again against its own model list, so
             // an image can never reach a model that would refuse it.
             images: vision.images,
-            temperature, maxTokens, mcpServers,
+            temperature, maxTokens: replyTokens, mcpServers,
             guildId: message.guild.id, usageOut, onToolEvent: activity.onEvent,
             // The guild's policy, and the buttons that answer it. The toolkit
             // holds the call until this resolves, so a tool that writes
@@ -737,6 +769,16 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             let tailMsg = currentMsg;
             let tailText = currentBuf;
 
+            // A turn that streamed no text at all — typically a model that hit
+            // its reply budget mid-plan — would otherwise leave the "…"
+            // placeholder, or a bare tool footer, and nothing else. Shown, not
+            // kept: fullResponse stays empty so history does not record it as
+            // something the model said.
+            if (!fullResponse.trim()) {
+                tailText = EMPTY_REPLY_MESSAGE;
+                if (!activity.footer()) await edit(tailMsg, EMPTY_REPLY_MESSAGE).catch(() => {});
+            }
+
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled && !toolActions) {
                 const { cleanText, action } = extractAction(fullResponse);
@@ -772,7 +814,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                 activity.reset();
                 return getCompletion(callArgs);
             }, { canRetry: () => !activity.ranTools });
-            response = response || '(empty response)';
+            // Whitespace counts as nothing. The note is chosen for display only
+            // below: fullResponse stays empty so history and speech skip it.
+            const emptyReply = !String(response ?? '').trim();
+            if (emptyReply) response = '';
 
             if (aiSettings.actionsEnabled && !toolActions) {
                 const { cleanText, action } = extractAction(response);
@@ -803,6 +848,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                     tailMsg = await send(message.channel, chunks[i]);
                     tailText = chunks[i];
                 }
+            } else if (emptyReply && !withheld) {
+                tailMsg = await reply(message, EMPTY_REPLY_MESSAGE);
+                tailText = EMPTY_REPLY_MESSAGE;
             }
             if (!withheld) await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         }

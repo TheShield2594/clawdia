@@ -115,6 +115,32 @@ function contextWindow(provider, model) {
     return hit ? hit.tokens : table.default;
 }
 
+// Output ceilings for the models known to sit below the layout reply floor
+// (discordChat's LAYOUT_REPLY_TOKENS). A request asking for more is refused by
+// the provider, so these are hard limits, not estimates. Models not listed are
+// assumed to allow at least the floor; the guild's own maxTokens is never
+// clamped by this, only the floor raised above it.
+const OUTPUT_LIMITS = {
+    openai: [
+        { match: /^(gpt-4o|chatgpt-4o|gpt-4\.1|gpt-5|o1|o3|o4)/i, tokens: null },
+        { match: /^(gpt-4|gpt-3\.5)/i, tokens: 4_096 }
+    ],
+    anthropic: [
+        { match: /claude-3-(opus|sonnet|haiku)/i, tokens: 4_096 },
+        { match: /claude-(2|instant)/i, tokens: 4_096 }
+    ]
+};
+
+/** The model's known output ceiling in tokens, or null when none is known. */
+function maxOutputTokens(provider, model) {
+    const table = OUTPUT_LIMITS[provider];
+    if (!table) return null;
+    const name = String(model || '');
+    const bare = name.includes('/') ? name.slice(name.indexOf('/') + 1) : name;
+    const hit = table.find(entry => entry.match.test(bare));
+    return hit ? hit.tokens : null;
+}
+
 /**
  * How many tokens of input this request may send.
  *
@@ -359,6 +385,7 @@ function fitPrompt({
 module.exports = {
     estimateTokens,
     contextWindow,
+    maxOutputTokens,
     inputBudget,
     fitPrompt,
     CHARS_PER_TOKEN,
